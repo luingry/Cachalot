@@ -6,7 +6,7 @@ name: Release SwissTechKnife module
 on:
   push:
     branches: [main]
-    paths: ['stk/Directory.Build.props', 'stk/VdGet.Module/module.json']
+    paths: ['stk/Directory.Build.props', 'stk/Cachalot.Module/module.json']
   workflow_dispatch:
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $manifest = Get-Content 'stk/VdGet.Module/module.json' -Raw | ConvertFrom-Json
+          $manifest = Get-Content 'stk/Cachalot.Module/module.json' -Raw | ConvertFrom-Json
           $version = $manifest.version
           $tag = "module-v$version"
           $zip = "artifacts/$($manifest.id)-$version.zip"
@@ -45,7 +45,7 @@ jobs:
           $own = @($manifest.releaseNotes | Where-Object { $_.version -eq $version }) | Select-Object -First 1
           $notes = @($own.notes | ForEach-Object { "- $_" }) -join "`n"
           if (-not $notes) { $notes = "Version $version." }
-          gh release create $tag $zip --target $env:GITHUB_SHA --title "VDGET module $version" --notes $notes
+          gh release create $tag $zip --target $env:GITHUB_SHA --title "Cachalot module $version" --notes $notes
           if ($LASTEXITCODE -ne 0) { throw "Failed to publish $tag." }
       - uses: actions/upload-artifact@v4
         with:
