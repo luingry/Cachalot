@@ -27,6 +27,7 @@ const MEAN_BEFORE = 16; // adaptive threshold window, frames before/after
 const MEAN_AFTER = 4;
 const FINE_HOP = 16; // fine energy envelope used to place each onset on its attack
 const FINE_WIN = 4; // in FINE_HOP blocks (64 samples ≈ 3 ms)
+const STEP_BEFORE = 14; // FINE_HOP blocks (≈ 10 ms) of level an attack is measured against
 const MIN_SECTION_S = 0.01;
 const ATTACK_MARGIN_S = 0.001;
 export const MIN_DRAG_GAP_S = 0.02; // the view keeps dragged dividers this far from their neighbours
@@ -216,26 +217,39 @@ function fineEnergy(samples) {
 }
 
 /**
- * Moves an onset found at frame resolution (~12 ms) onto its attack: the
- * steepest rise of the fine energy near it marks the hit; the attack starts at
- * the first 0.7 ms block before that which clearly rises above the level just
- * before the hit (4×). Then 1 ms earlier, so the section before ends in the
- * quiet — no more than that, or every section would start early.
+ * Moves an onset found at frame resolution (~12 ms) onto its attack: the hit
+ * is the biggest step up of the fine energy near it (the next ~3 ms against
+ * the ~10 ms before, among the steps that reach the loud part); the attack
+ * starts at the first 0.7 ms block before that which clearly rises above the
+ * level just before the hit (4×). Then 1 ms earlier, so the section before
+ * ends in the quiet — no more than that, or every section would start early.
+ * A step, not the steepest rise: a kick that comes in over a loud build-up
+ * keeps rising for tens of ms, and its steepest point is a later cycle of it.
  */
 function placeOnAttack(frame, fine, sampleRate) {
   const { blocks, energy } = fine;
   const center = frame * HOP;
-  const from = Math.max(1, Math.floor((center - 2 * HOP) / FINE_HOP));
-  const to = Math.min(energy.length - 1, Math.ceil((center + FFT_SIZE / 2) / FINE_HOP));
+  const from = Math.max(STEP_BEFORE, Math.floor((center - 3 * HOP) / FINE_HOP));
+  const to = Math.min(energy.length - FINE_WIN, Math.ceil((center + FFT_SIZE / 2) / FINE_HOP));
+  if (to < from) return Math.max(0, center / sampleRate - ATTACK_MARGIN_S); // too close to an edge to look around
+  const prefix = new Float64Array(to - from + STEP_BEFORE + 2);
+  for (let b = from - STEP_BEFORE, i = 0; b <= to; b++, i++) prefix[i + 1] = prefix[i] + blocks[b];
+  const meanBefore = (b) => (prefix[b - from + STEP_BEFORE] - prefix[b - from]) / STEP_BEFORE;
+  const after = (b) => energy[b + FINE_WIN - 1]; // blocks b … b+FINE_WIN-1
+  let loud = 0;
+  for (let b = from; b <= to; b++) loud = Math.max(loud, after(b));
+  const eps = 1e-7 * FINE_HOP * FINE_WIN;
   let best = from;
-  let bestRise = -Infinity;
+  let bestStep = -Infinity;
   for (let b = from; b <= to; b++) {
-    const rise = energy[b] - energy[b - 1];
-    if (rise > bestRise) {
-      bestRise = rise;
+    if (after(b) < 0.25 * loud) continue; // a bump far below the hit is not its attack
+    const step = (after(b) + eps) / (meanBefore(b) * FINE_WIN + eps);
+    if (step > bestStep) {
+      bestStep = step;
       best = b;
     }
   }
+  best = Math.min(energy.length - 1, best + FINE_WIN - 1); // where the energy window that starts the step ends, as before
   // the level just before the hit: the median of ~4–11 ms earlier
   const before = [];
   for (let b = Math.max(0, best - 16); b <= best - FINE_WIN - 2; b++) before.push(blocks[b]);
@@ -295,53 +309,117 @@ export function pickOnsets(samples, envelope, sampleRate = ANALYSIS_RATE) {
 
 // ---- Tempo and bar grid ----------------------------------------------------------
 
+const TEMPO_LOW_BPM = 90; // the tempo is told in [90, 180), the octave DJ software and stores give for most music…
+const TEMPO_FAST_BPM = 160; // …but a beat this fast with nothing played between its hits is half of it (hip-hop at 85)
+const LEVEL_PRESENT = 0.5; // a pulse is played when some band repeats at its period this much (against its bar)
+const LEVEL_SUBDIVIDED = 0.35; // …and a beat is subdivided when some band repeats this much at half of it
+
 /**
- * Global tempo from the autocorrelation of the novelty curve, weighted toward
- * 120 BPM (log-normal prior) so the octave picked is the one people count.
- * Returns { bpm, confidence }.
+ * Autocorrelation of max(0, x − mean) for lags 0 … maxLag, per overlapping frame, 1 at lag 0. By FFT: the power
+ * spectrum of the zero-padded signal is real and even, so its forward transform is the autocorrelation (× size).
  */
-export function estimateTempo(env, frameRate) {
-  const n = env.length;
+function autocorrelation(signal, maxLag, fftCache) {
+  const n = signal.length;
   let mean = 0;
-  for (let t = 0; t < n; t++) mean += env[t];
+  for (let t = 0; t < n; t++) mean += signal[t];
   mean /= n || 1;
-  const x = new Float64Array(n);
-  for (let t = 0; t < n; t++) x[t] = Math.max(0, env[t] - mean);
-  const minLag = Math.max(1, Math.floor((frameRate * 60) / 200));
-  const maxLag = Math.min(n - 2, Math.ceil((frameRate * 60) / 55));
-  if (maxLag <= minLag + 2) return { bpm: 120, confidence: 0 };
-  const acf = new Float64Array(2 * maxLag + 2);
-  let energy = 0;
-  for (let t = 0; t < n; t++) energy += x[t] * x[t];
-  for (let lag = minLag; lag < acf.length && lag < n; lag++) {
-    let sum = 0;
-    for (let t = 0; t + lag < n; t++) sum += x[t] * x[t + lag];
-    acf[lag] = sum / (n - lag);
+  let size = 2;
+  while (size < 2 * n) size <<= 1;
+  const fft = fftCache.get(size) || fftCache.set(size, makeFft(size)).get(size);
+  const re = new Float64Array(size);
+  const im = new Float64Array(size);
+  // smoothed over ~±2 frames: a hit is one frame wide, and a period a fraction of a frame off its peaks would miss them
+  const at = (t) => (t >= 0 && t < n ? Math.max(0, signal[t] - mean) : 0);
+  for (let t = 0; t < n; t++) re[t] = (at(t - 2) + 4 * at(t - 1) + 6 * at(t) + 4 * at(t + 1) + at(t + 2)) / 16;
+  fft(re, im);
+  for (let k = 0; k < size; k++) {
+    re[k] = re[k] * re[k] + im[k] * im[k];
+    im[k] = 0;
   }
-  let best = minLag;
+  fft(re, im);
+  const out = new Float64Array(maxLag + 2);
+  const zero = re[0] / n;
+  for (let lag = 0; lag < out.length && lag < n; lag++) out[lag] = zero > 0 ? re[lag] / (n - lag) / zero : 0;
+  return out;
+}
+
+function lagValue(curve, lag) {
+  const i = Math.floor(lag);
+  if (i < 0 || i + 1 >= curve.length) return 0;
+  const f = lag - i;
+  return curve[i] * (1 - f) + curve[i + 1] * f;
+}
+
+/**
+ * Global tempo, the beat people count. Returns { bpm, confidence }.
+ *  1. The meter: the period whose quarter, half, double and quadruple repeat as well (sixteenth … bar). A binary
+ *     meter, so a 3-3-2 rhythm or a hit every 1.5 or 3 beats is not taken for the beat; that gives the beat up to an
+ *     octave. On a slightly smoothed curve, so hits a fraction of a frame off the period still count.
+ *  2. The octave: the one in [90, 180) BPM, as DJ software and stores tell it (a half-time groove that repeats every
+ *     two beats is still 138, a drum & bass break 174) — if it is played: some band (kick, snare, hats…) must repeat
+ *     at that period, else the slower octave (a ballad at 72 with nothing on the eighths). And a beat of 160 or more
+ *     with nothing between its hits is half of it (hip-hop at 85 with hats on the eighths, not 170).
+ * The autocorrelations weigh the low end most (pulseEnvelope) for the meter, each band alone for the octave.
+ */
+export function estimateTempo(envelope) {
+  const { env, bands, frameRate } = envelope;
+  const pulse = pulseEnvelope(envelope);
+  const n = pulse.length;
+  const minLag = (frameRate * 60) / 240;
+  const maxLag = (frameRate * 60) / 40;
+  const reach = Math.min(n - 2, Math.ceil(4 * maxLag) + 2);
+  if (reach < 4 * minLag + 2) return { bpm: 120, confidence: 0 };
+  const ffts = new Map();
+  const acf = autocorrelation(pulse, reach, ffts);
+  const bandAcf = (bands && bands.length ? bands : [env]).map((b) => autocorrelation(b, reach, ffts));
+
+  const comb = (L) => lagValue(acf, L / 4) + lagValue(acf, L / 2) + lagValue(acf, L) + lagValue(acf, 2 * L) + lagValue(acf, 4 * L);
+  let base = minLag;
   let bestScore = -Infinity;
-  const score = (lag) => {
-    const bpm = (60 * frameRate) / lag;
-    const prior = Math.exp(-0.5 * (Math.log2(bpm / 120) / 0.9) ** 2);
-    return (acf[lag] + 0.5 * (acf[2 * lag] || 0)) * prior;
-  };
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    const s = score(lag);
+  for (let L = minLag; L <= maxLag && 4 * L < reach; L += 0.25) {
+    const s = comb(L);
     if (s > bestScore) {
       bestScore = s;
-      best = lag;
+      base = L;
     }
   }
-  // sub-frame lag: parabola through the neighbours
-  let lagF = best;
-  if (best > minLag && best < maxLag) {
-    const a = score(best - 1);
-    const c = score(best + 1);
-    const denom = a - 2 * bestScore + c;
-    if (denom < 0) lagF = best + (0.5 * (a - c)) / denom;
+
+  const bpmOf = (L) => (60 * frameRate) / L;
+  const levels = [];
+  for (let L = base; L > 1; L /= 2) levels.push(L);
+  for (let L = base * 2; L < reach; L *= 2) levels.push(L);
+  // how much a signal repeats at a period, from its typical level at any lag (0) to its strongest level (1): each band
+  // alone (a clap on 2 and 4), all of them (kick on 1 and 3 + clap on 2 and 4 is a pulse on every beat), the low end
+  const signals = [...bandAcf, autocorrelation(env, reach, ffts), acf].map((c) => {
+    const typical = percentile(c.subarray(Math.floor(minLag / 2), reach), 0.5);
+    const strongest = Math.max(...levels.map((L) => lagValue(c, L)));
+    return { c, typical, span: strongest - typical };
+  });
+  const presence = (L) => {
+    let p = 0;
+    for (const { c, typical, span } of signals) if (span > 0.05) p = Math.max(p, (lagValue(c, L) - typical) / span);
+    return p;
+  };
+  let beat = base;
+  while (bpmOf(beat) < TEMPO_LOW_BPM && beat / 2 > 1) beat /= 2;
+  while (bpmOf(beat) >= 2 * TEMPO_LOW_BPM) beat *= 2;
+  if (presence(beat) < LEVEL_PRESENT) {
+    if (presence(beat * 2) >= LEVEL_PRESENT) beat *= 2; // one octave down at most: two would be under 45 BPM
+  } else if (bpmOf(beat) >= TEMPO_FAST_BPM && presence(beat / 2) < LEVEL_SUBDIVIDED && presence(beat * 2) >= LEVEL_PRESENT) {
+    beat *= 2;
   }
-  const zero = energy / (n || 1);
-  return { bpm: (60 * frameRate) / lagF, confidence: zero > 0 ? Math.max(0, Math.min(1, acf[best] / zero)) : 0 };
+
+  // the exact period: the comb's peak near it, to a hundredth of a frame
+  let lag = beat;
+  let peak = -Infinity;
+  for (let L = beat * 0.985; L <= beat * 1.015; L += 0.01) {
+    const s = comb(L);
+    if (s > peak) {
+      peak = s;
+      lag = L;
+    }
+  }
+  return { bpm: bpmOf(lag), confidence: Math.max(0, Math.min(1, lagValue(acf, lag))) };
 }
 
 function sampleAt(curve, f) {
@@ -349,6 +427,30 @@ function sampleAt(curve, f) {
   if (i < 0 || i >= curve.length) return 0;
   const frac = f - i;
   return curve[i] * (1 - frac) + (i + 1 < curve.length ? curve[i + 1] : 0) * frac;
+}
+
+/**
+ * The hit where the music (bar 1) starts: the first one strong enough, unless a much stronger hit follows it
+ * within less than half a beat. That one was a pickup (the last hit of a build-up, a snare before the drop) and the
+ * downbeat it leads into is where the music comes in.
+ */
+function musicStart(onsets, beat) {
+  // and the music goes on from it: a lone hit (noise or a click starting out of digital silence, a sound effect long
+  // before the song) is not where it starts
+  const goesOn = (i) => {
+    let more = 0;
+    for (let j = i + 1; j < onsets.length && onsets[j].time - onsets[i].time <= 8 * beat; j++) {
+      if (onsets[j].strength >= FIRST_HIT_STRENGTH && ++more >= 2) return true;
+    }
+    return false;
+  };
+  let i = onsets.findIndex((o, k) => o.strength >= FIRST_HIT_STRENGTH && goesOn(k));
+  if (i < 0) i = onsets.findIndex((o) => o.strength >= FIRST_HIT_STRENGTH);
+  if (i < 0) return null;
+  for (let j = i + 1; j < onsets.length && onsets[j].time - onsets[i].time < PICKUP_BEATS * beat; j++) {
+    if (onsets[j].strength >= Math.max(TRACK_STRENGTH, PICKUP_RATIO * onsets[i].strength)) i = j;
+  }
+  return onsets[i];
 }
 
 /**
@@ -379,7 +481,7 @@ export function beatGrid(envelope, bpm, onsets = []) {
   const bar = 4 * beat;
   // Bar 1 starts where the music does: the first real hit. Songs start on a downbeat far more often than the
   // strongest-bass guess below gets right, and a bar 1 that starts mid-music shifts every bar after it.
-  const first = onsets.find((o) => o.strength >= FIRST_HIT_STRENGTH);
+  const first = musicStart(onsets, beat);
   if (first) return { beat, bar, origin: first.time };
   const down = perBeat.indexOf(Math.max(...perBeat));
   const origin = ((((bestPhase + down * period) / frameRate) % bar) + bar) % bar;
@@ -425,6 +527,39 @@ export function refineTempo(onsets, beat, origin) {
     }
     if (window >= span) break;
   }
+  // Then exact, over the whole song: every hit clearly played, weighted by its strength, within a tolerance that
+  // narrows to 20 ms, so a sixteenth or a flam near a beat never leans on it. Good to ~1e-5: a few ms over 5 min.
+  // The low end (kick, bass) when there is enough of it: it carries the beat, while hats, shakers and percussion
+  // are often played a little ahead or behind it on purpose (the groove) and would tilt the line.
+  const clear = onsets.filter((o) => o.strength >= GUARD_STRENGTH);
+  const low = clear.filter((o) => o.band <= 1);
+  const played = low.length >= 32 ? low : clear;
+  for (const tol of [Math.min(0.06, 0.12 * b), 0.035, 0.02]) {
+    for (let iter = 0; iter < 3; iter++) {
+      let w = 0;
+      let sk = 0;
+      let st = 0;
+      let skk = 0;
+      let skt = 0;
+      let n = 0;
+      for (const o of played) {
+        const k = Math.round((o.time - a) / b);
+        if (Math.abs(o.time - (a + k * b)) > tol) continue;
+        n++;
+        w += o.strength;
+        sk += o.strength * k;
+        st += o.strength * o.time;
+        skk += o.strength * k * k;
+        skt += o.strength * k * o.time;
+      }
+      const den = w * skk - sk * sk;
+      if (n < 8 || den <= 1e-9) break;
+      const nb = (w * skt - sk * st) / den;
+      if (!(nb > beat * 0.97 && nb < beat * 1.03)) break;
+      a = (st - nb * sk) / w;
+      b = nb;
+    }
+  }
   const k0 = Math.round((origin - a) / b);
   return { beat: b, origin: a + k0 * b };
 }
@@ -449,20 +584,23 @@ function pulseEnvelope({ bands, env }) {
 export function analyze(samples, sampleRate = ANALYSIS_RATE) {
   const envelope = onsetEnvelope(samples, sampleRate);
   const onsets = pickOnsets(samples, envelope, sampleRate);
-  let { bpm, confidence } = estimateTempo(pulseEnvelope(envelope), envelope.frameRate);
+  let { bpm, confidence } = estimateTempo(envelope);
   if (!Number.isFinite(bpm) || bpm <= 0) bpm = 120;
   const grid = beatGrid(envelope, bpm, onsets);
   const fitted = refineTempo(onsets, grid.beat, grid.origin);
   bpm = 60 / fitted.beat;
+  const duration = samples.length / sampleRate;
+  const tempo = tempoMap(onsets, fitted.beat, fitted.origin, duration);
   return {
-    duration: samples.length / sampleRate,
+    duration,
     sampleRate,
     onsets,
     bpm,
     confidence,
     beat: fitted.beat,
     bar: 4 * fitted.beat,
-    origin: fitted.origin,
+    origin: tempo.dynamic ? timeAt(tempo, 0) : fitted.origin, // bar 1 on its grid's own first beat
+    tempo,
   };
 }
 
@@ -502,47 +640,149 @@ function firstAtOrAfter(onsets, time) {
   return lo;
 }
 
-const TRACK_STRENGTH = 0.5; // hits strong enough to steer the beat grid
-const SNAP_S = 0.015; // a grid cut moves onto a transient this close after it (never further)
-const GUARD_S = 0.03; // …or back onto its own hit played up to this much early (the section must not end in its attack)
-const GUARD_STRENGTH = 0.3; // hits this strong count for that guard even below the sensitivity
-const FIRST_HIT_STRENGTH = 0.3; // the first onset this strong is where the music (and bar 1) starts
-const LEAD_IN_S = 0.05; // a lead-in this short joins the first section instead of being one
+const TRACK_STRENGTH = 0.5; // hits strong enough to find the tempo from
+const SNAP_S = 0.015; // a grid cut moves onto its own hit's attack when it is this close to the line (never further)
+const GUARD_S = 0.03; // …or onto a kick / bass hit played up to this much early (Auto: a transient this much ahead counts)
+const GUARD_STRENGTH = 0.3; // hits this strong are clearly played: they count for the tempo fit and for a cut's own hit
+const FIRST_HIT_STRENGTH = 0.3; // the first onset this strong is where the music (and bar 1) starts…
+const PICKUP_BEATS = 0.45; // …unless a hit this many beats after it at least PICKUP_RATIO× as strong is the downbeat
+const PICKUP_RATIO = 1.5;
+const LEAD_IN_S = 0.05; // a lead-in this short joins the first section instead of being one, and so does one shorter
+// than a quarter of a section (never more than a quarter beat): the grid counted back from bar 1 can leave a sliver at 0 s
 const AUTO_BARS_CONFIDENCE = 0.15; // below this tempo confidence, Auto cuts at every transient (no bars)
+const GRID_WINDOW_BEATS = 16; // the dynamic grid is a straight line per 4 bars…
+const DYNAMIC_GAIN = 0.15; // …used only when it puts this much more of the music on its beats than the fixed grid
 
 /**
- * The beats of the song, following the music: starting from the detected
- * phase, each beat is pulled halfway toward the strong hit next to it, so a
- * tempo a little off does not drift over the song. Returns beat times from at
- * or before 0 to past the end, and which of them start a bar.
+ * The beat grid, like a DJ player's: a fixed grid (bar 1 and an exact tempo, every beat at origin + k × beat)
+ * for music at a steady tempo, anything made in a DAW, so nothing drifts from the first bar to the last and a
+ * syncopated hit near a beat never bends it. For music whose tempo moves (a band without a click) a dynamic grid
+ * instead: a straight line per 4 bars fitted to that stretch's on-beat hits, joined where they meet, never a beat
+ * pulled about on its own. The dynamic one is used only when it puts clearly more of the music on its beats.
+ * Returns { ks, ts, dynamic }: beat k (0 = bar 1) is at time t, linear between them and beyond the ends.
+ */
+export function tempoMap(onsets, beat, origin, duration) {
+  const fixed = { ks: [0, 1], ts: [origin, origin + beat], dynamic: false };
+  const played = onsets.filter((o) => o.strength >= GUARD_STRENGTH);
+  if (played.length < 16) return fixed;
+  const W = GRID_WINDOW_BEATS;
+  // a weighted least-squares line (time = a + k × b) through the hits on beats k0 … k1-1 within tol of `line`
+  const fitOnce = (line, k0, k1, tol) => {
+    let w = 0;
+    let sk = 0;
+    let st = 0;
+    let skk = 0;
+    let skt = 0;
+    let n = 0;
+    const lo = firstAtOrAfter(played, line.a + k0 * line.b - tol);
+    for (let i = lo; i < played.length && played[i].time <= line.a + k1 * line.b + tol; i++) {
+      const o = played[i];
+      const k = Math.round((o.time - line.a) / line.b);
+      if (k < k0 || k >= k1 || Math.abs(o.time - (line.a + k * line.b)) > tol) continue;
+      n++;
+      w += o.strength;
+      sk += o.strength * k;
+      st += o.strength * o.time;
+      skk += o.strength * k * k;
+      skt += o.strength * k * o.time;
+    }
+    const den = w * skk - sk * sk;
+    if (n < Math.max(3, Math.round((k1 - k0) * 0.35)) || den <= 1e-9) return null;
+    const b = (w * skt - sk * st) / den;
+    if (!(Math.abs(b / line.b - 1) <= 0.03)) return null;
+    return { a: (st - b * sk) / w, b };
+  };
+  // where the last line roughly puts the beats (the tempo moved a little), then exactly: 15 % of a beat, 40, 25 ms
+  const fitIn = (line, k0, k1) => {
+    let l = line;
+    for (const [i, tol] of [Math.min(0.15 * line.b, 0.09), Math.min(0.08 * line.b, 0.04), 0.025].entries()) {
+      const f = fitOnce(l, k0, k1, tol);
+      if (!f) return i ? l : null;
+      l = f;
+    }
+    return l;
+  };
+  // the tempo right at bar 1, over 4, 8 and then 16 beats: the song's average can be well off it already
+  let first = { a: origin, b: beat };
+  for (const span of [4, 8, 16]) first = fitIn(first, 0, span) || first;
+  // window by window from bar 1, forward and back: the last window's line says where the next one's beats are
+  const lines = new Map();
+  for (const dir of [1, -1]) {
+    let line = first;
+    for (let w = dir > 0 ? 0 : -1; Math.abs(w) < 100000; w += dir) {
+      const k0 = w * W;
+      if (dir > 0 ? line.a + k0 * line.b > duration : line.a + (k0 + W) * line.b < 0) break;
+      line = fitIn(line, k0, k0 + W) || line; // a breakdown (no beat played): the line goes on as it was
+      lines.set(w, line);
+    }
+  }
+  const ws = [...lines.keys()].sort((x, y) => x - y);
+  const ks = [];
+  const ts = [];
+  ws.forEach((w, i) => {
+    const k = w * W;
+    const at = (l) => l.a + k * l.b;
+    ks.push(k);
+    ts.push(i ? (at(lines.get(ws[i - 1])) + at(lines.get(w))) / 2 : at(lines.get(w)));
+  });
+  const last = lines.get(ws[ws.length - 1]);
+  ks.push((ws[ws.length - 1] + 1) * W);
+  ts.push(last.a + ks[ks.length - 1] * last.b);
+  const dynamic = { ks, ts, dynamic: true };
+  // how well a grid sits on the music: the hits on its beats, the closer the more (within 30 ms)
+  const fit = (map) => {
+    let s = 0;
+    for (const o of played) {
+      const k = Math.round(indexAt(map, o.time));
+      s += o.strength * Math.max(0, 1 - Math.abs(o.time - timeAt(map, k)) / 0.03);
+    }
+    return s;
+  };
+  return fit(dynamic) > fit(fixed) * (1 + DYNAMIC_GAIN) ? dynamic : fixed;
+}
+
+function segmentOf(xs, x) {
+  let lo = 0;
+  let hi = xs.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (xs[mid] <= x) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** Time of beat u (fractional) on a tempo map. */
+export function timeAt(map, u) {
+  const { ks, ts } = map;
+  const i = segmentOf(ks, u);
+  return ts[i] + ((u - ks[i]) * (ts[i + 1] - ts[i])) / (ks[i + 1] - ks[i]);
+}
+
+/** Beat (fractional) at time t on a tempo map. */
+export function indexAt(map, t) {
+  const { ks, ts } = map;
+  const i = segmentOf(ts, t);
+  return ks[i] + ((t - ts[i]) * (ks[i + 1] - ks[i])) / (ts[i + 1] - ts[i]);
+}
+
+/**
+ * The beats of the song on its grid (tempoMap), counted from bar 1: the detected one, or the flag the user placed
+ * (the grid keeps its tempo and moves to start there). Returns beat times from at or before 0 to past the end, and
+ * which of them start a bar.
  */
 export function trackBeats(analysis) {
   const beat = analysis.beat || 0.5;
-  const strong = analysis.onsets.filter((o) => o.strength >= TRACK_STRENGTH);
-  const tolerance = Math.min(beat * 0.4, 0.1);
   const origin = analysis.origin || 0;
+  const map = analysis.tempo || { ks: [0, 1], ts: [origin, origin + beat] };
+  const base = indexAt(map, origin);
   const times = [];
   const bars = [];
-  // before bar 1: plain beats back to 0 (nothing to follow there); bar 1 itself sits exactly on the origin
-  for (let k = Math.ceil(origin / beat); k >= 1; k--) {
-    times.push(origin - k * beat);
-    bars.push(k % 4 === 0);
-  }
-  let anchor = origin;
-  let anchorIndex = 0;
-  for (let n = 0; ; n++) {
-    const line = anchor + (n - anchorIndex) * beat;
-    times.push(line);
-    bars.push(n % 4 === 0);
-    if (line > analysis.duration + beat) break;
-    let best = null;
-    for (let i = firstAtOrAfter(strong, line - tolerance); i < strong.length && strong[i].time <= line + tolerance; i++) {
-      if (!best || strong[i].strength > best.strength) best = strong[i];
-    }
-    if (best) {
-      anchor = line + 0.5 * (best.time - line);
-      anchorIndex = n;
-    }
+  for (let j = Math.floor(indexAt(map, 0) - base); ; j++) {
+    const t = j === 0 ? origin : timeAt(map, base + j); // bar 1 itself sits exactly on the origin
+    times.push(t);
+    bars.push(((j % 4) + 4) % 4 === 0);
+    if (t > analysis.duration + beat) break;
   }
   return { times, bars };
 }
@@ -614,17 +854,18 @@ function computeGridLines(analysis, grid) {
 }
 
 /**
- * Times where the song is cut:
+ * Times where the song is cut. Without `detect` (the user's "Auto-detect transient" off): exactly on every line
+ * of the grid, built on the tempo (Auto counts as 1:1), nothing moved toward a transient. With it:
  *  - "auto": bars first — every bar starts a section, and inside a bar a cut
  *    goes on each 1/16 line where a transient that passes the sensitivity is
  *    played (on its attack). Without a steady pulse: at every transient;
  *  - "1" … "64": on every line of that grid, so each section is a bar, half a
- *    bar … 1/64 long. A cut moves onto a transient (that passes the
- *    sensitivity) only when one is within 15 ms after it, and back onto one
- *    that starts up to 60 ms (≤ 30 % of a section) before it, so no section
- *    ends with the first samples of the next hit.
+ *    bar … 1/64 long. A cut stays on its line, or moves onto that beat's own
+ *    hit (the strongest within 15 ms, or a kick / bass up to 30 ms early; ≤ a
+ *    quarter of a section), so no section ends with the first samples of the
+ *    next one.
  */
-export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid = "auto" } = {}) {
+export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid = "auto", detect = true } = {}) {
   const threshold = thresholdFor(sensitivity);
   const onsets = analysis.onsets.filter((o) => o.strength >= threshold);
   const duration = analysis.duration;
@@ -634,25 +875,41 @@ export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid =
   // exactly on the mark (the detected start keeps the grid running back over the lead-in)
   const beforeMusic = (t) => analysis.originSet && t < origin - 1e-6;
   const isMarkedStart = (t) => analysis.originSet && Math.abs(t - origin) < 1e-6;
-  const audible = analysis.onsets.filter((o) => o.strength >= Math.min(threshold, GUARD_STRENGTH));
+  const audible = analysis.onsets.filter((o) => o.strength >= GUARD_STRENGTH);
+  const leadIn = (step) => Math.max(LEAD_IN_S, Math.min(beat, step || 0) / 4);
 
   /**
-   * Where a grid line really cuts: back onto a hit that starts a little before it (the section before must not end
-   * with its attack), else onto a hit within 15 ms after it, else on the line.
+   * Where a grid line really cuts: on the line (the grid is exact), or on its own hit's attack, so the section
+   * before never ends with the first samples of the beat. Its own hit: the strongest within 15 ms of it, or a kick or
+   * bass hit played up to 30 ms early. Anything else further off (a clap, shaker or hat played 20–40 ms ahead of the
+   * beat on purpose, a flam) is not the beat and never moves a cut.
    */
   const cutAt = (line, step) => {
-    // the line's own hit: the nearest one played a little early (≤ 30 ms, any audible hit) or late (≤ 15 ms,
-    // passing the sensitivity). Another sound further before the line (a hi-hat on the 16th before) is not its hit.
-    const early = nearestOnset(audible, line, Math.min(GUARD_S, step * 0.25));
-    const late = nearestOnset(onsets, line, Math.min(SNAP_S, step / 4));
-    const own = [early && early.time <= line ? early : null, late].filter(Boolean);
-    if (!own.length) return line;
-    return own.reduce((x, y) => (Math.abs(y.time - line) < Math.abs(x.time - line) ? y : x)).time;
+    const reach = Math.min(SNAP_S, step / 4);
+    const early = Math.min(GUARD_S, step / 4);
+    let own = null;
+    for (let i = firstAtOrAfter(audible, line - Math.max(reach, early)); i < audible.length && audible[i].time <= line + reach; i++) {
+      const o = audible[i];
+      const near = Math.abs(o.time - line) <= reach;
+      const earlyBeat = o.time <= line && o.band <= 1 && o.strength >= TRACK_STRENGTH;
+      if ((near || earlyBeat) && (!own || o.strength > own.strength)) own = o;
+    }
+    return own ? own.time : line;
   };
   const cuts = [];
   const push = (t) => {
     if (t > MIN_SECTION_S && t < duration - MIN_SECTION_S && (!cuts.length || t - cuts[cuts.length - 1] > MIN_SECTION_S)) cuts.push(t);
   };
+
+  if (!detect) {
+    const g = grid === "auto" || !GRIDS.includes(String(grid)) ? "1" : String(grid);
+    const step = gridStep(analysis, g);
+    for (const { time: line } of gridLines(analysis, g)) {
+      if (line <= leadIn(step) || line >= duration - MIN_SECTION_S || beforeMusic(line)) continue;
+      push(line);
+    }
+    return cuts;
+  }
 
   if (grid === "auto" || !GRIDS.includes(String(grid))) {
     if ((analysis.confidence ?? 1) < AUTO_BARS_CONFIDENCE || !analysis.bar) {
@@ -675,7 +932,7 @@ export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid =
     // each 1/16 line where a transient (that passes the sensitivity) is played, on its attack.
     const step = gridStep(analysis, "16");
     for (const line of gridLines(analysis, "16")) {
-      if (line.time <= LEAD_IN_S || line.time >= duration - MIN_SECTION_S || beforeMusic(line.time)) continue;
+      if (line.time <= leadIn(line.bar ? analysis.bar : step) || line.time >= duration - MIN_SECTION_S || beforeMusic(line.time)) continue;
       if (line.bar) {
         push(isMarkedStart(line.time) ? line.time : cutAt(line.time, step));
         continue;
@@ -688,7 +945,7 @@ export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid =
   }
   const step = gridStep(analysis, grid);
   for (const { time: line } of gridLines(analysis, grid)) {
-    if (line <= LEAD_IN_S || line >= duration - MIN_SECTION_S || beforeMusic(line)) continue; // the song's own edges are not cuts
+    if (line <= leadIn(step) || line >= duration - MIN_SECTION_S || beforeMusic(line)) continue; // the song's own edges are not cuts
     push(isMarkedStart(line) ? line : cutAt(line, step));
   }
   return cuts;

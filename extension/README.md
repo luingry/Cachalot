@@ -53,23 +53,29 @@ mais nova).
     superior esquerdo e, no direito, desfazer/refazer e **Baixar todos**. O play toca a seleção (ou a música inteira),
     vira pause enquanto toca, e o pause guarda o ponto para continuar dali (Espaço faz o mesmo). O Cachalot baixa o áudio (sem converter, sem aparecer na lista de
     downloads) e o popup acha os **transientes** — ataques separados por timbre (graves, médios, agudos, cada faixa com
-    o seu peso) — e o **andamento** (BPM e compassos) e marca as divisões na própria waveform. Controles pequenos no
-    topo, em tempo real. Antes de cortar, a música inteira é marcada em **compassos** (as barras aparecem sempre na
-    waveform, numa grade que segue o andamento detectado e as batidas fortes) e os cortes saem dela: a divisão
-    **1:1, 1:2, 1:4, 1:8, 1:16, 1:32, 1:64** e, na linha de baixo, **2:1, 4:1, 8:1, 16:1, 32:1** (2 a 32 compassos,
-    contados de onde a música começa) deixa cada seção desse tamanho — o corte só gruda no ataque de um transiente
-    a até 15 ms da linha; **Auto** corta em todo começo de compasso e, dentro dele, em cada 1/16 onde um transiente é
-    tocado (sem pulso estável, em cada transiente); **Sensibilidade** (à esquerda só os transientes fortes, à direita
-    também os fracos); e **Loop** (a seção clicada para ouvir toca em volta até clicar de novo; redimensionada, juntada ou
-    com fade mudado enquanto toca, o loop passa na hora a usar o novo início e fim). Nenhuma seção termina com o
-    começo do próximo ataque: o corte fica 2 ms antes dele e, nas grades, recua até o ataque que começa pouco antes da
-    linha (até 60 ms). Cada seção ouvida ou salva tem rampas de 2 ms no começo e 3 ms no fim contra estalo (o corte
-    quase nunca cai onde a onda cruza o zero — sem elas cada volta do loop começava com um "pop").
+    o seu peso) — e o **andamento** (BPM e compassos) e marca as divisões na própria waveform. O BPM é o que se
+    conta, entre 90 e 180 como num software de DJ (um groove meio-tempo a 138 é 138, não 69). Controles pequenos no
+    topo, em tempo real: na primeira linha **Sensibilidade**, **Loop** e **Auto-detect transient**; embaixo, todas as
+    divisões numa linha só, da maior para a menor — **32:1, 16:1, 8:1, 4:1, 2:1** (32 a 2 compassos por seção),
+    **1:1** (o padrão de toda música nova), **1:2 … 1:64** e **Auto**. A música inteira é marcada em **compassos**
+    numa grade como a de um CDJ: compasso 1 e o BPM exato (ajustado no grave da música inteira), cada tempo no mesmo
+    espaçamento do começo ao fim, sem acumular erro; numa música de andamento variável (banda sem click) a grade
+    acompanha, uma reta a cada 4 compassos. A divisão escolhida deixa cada seção desse tamanho.
+    - **Auto-detect transient** começa sempre desmarcado: cada seção fica exatamente na grade. Marcado, o corte vai
+      para o ataque do próprio tempo (o golpe mais forte a até 15 ms da linha, ou um bumbo/baixo até 30 ms adiantado;
+      clap, shaker ou chimbal tocados à frente de propósito não puxam o corte), as marcas dos transientes aparecem
+      sob a waveform, a **Sensibilidade** vale (à esquerda só os transientes fortes, à direita também os fracos) e
+      **Auto** fica disponível: corta em todo começo de compasso e, dentro dele, em cada 1/16 onde um transiente é
+      tocado (sem pulso estável, em cada transiente). Escolher Auto marca a caixa; desmarcá-la no Auto volta ao 1:1.
+    - **Loop**: a seção clicada para ouvir toca em volta até clicar de novo; redimensionada, juntada ou com fade mudado
+      enquanto toca, o loop passa na hora a usar o novo início e fim.
+    - Cada seção ouvida ou salva tem rampas de 2 ms no começo e 3 ms no fim contra estalo (o corte quase nunca cai onde
+      a onda cruza o zero — sem elas cada volta do loop começava com um "pop").
     - Abaixo, a **música inteira** numa waveform de ¼ da altura: a janela laranja é o trecho que aparece em cima —
       arraste-a para andar pela música, arraste uma das bordas para mudar o zoom, clique fora para ir até lá, role
       o mouse para zoom. O que está tocando aparece marcado em verde, com a barra no ponto exato.
     - Ao fundo da waveform fica a grade de compassos, na proporção do zoom: afastado, só os grupos de 16 e 4
-      compassos; aproximando, aparecem os compassos (numerados a partir do compasso 1, onde a música começa), os
+      compassos; aproximando, aparecem os compassos (numerados a partir do compasso 1), os
       tempos e as subdivisões 1/8 … 1/64 — cada nível surge quando suas linhas ficam a ~12 px uma da outra.
     - Rolar o mouse dá zoom; arrastar com o botão direito (ou do meio), Shift+rolar ou a rolagem lateral move a
       vista para os lados.
@@ -93,10 +99,10 @@ mais nova).
     - Ao baixar (uma seção, uma seleção ou todas), um popup pergunta o formato: **MP3** (320 kbps), **WAV** ou
       **FLAC**, com **Lembrar escolha**. A escolha lembrada fica nas configurações do Cachalot (*Formato das seções*),
       onde dá para trocá-la ou voltar a **Perguntar sempre**.
-    - **Início da música**: a bandeira azul na régua (com uma linha tracejada sobre a waveform) marca o compasso 1.
-      Arraste-a para onde a música começa de verdade (gruda no transiente mais próximo; com Alt, livre): a grade e
-      todas as seções andam junto, contadas a partir dela, e o que vem antes vira uma seção só. Duplo clique na
-      bandeira volta ao início detectado; Ctrl+Z desfaz.
+    - **Compasso 1**: a bandeira azul na régua (com uma linha tracejada sobre a waveform) fica no começo do áudio; a
+      grade se alinha à música sozinha. Arraste-a para marcar onde a música começa (gruda no transiente mais próximo;
+      com Alt, livre): a grade e todas as seções andam junto, contadas a partir dela, e o que vem antes vira uma seção
+      só. Duplo clique na bandeira volta ao começo; Ctrl+Z desfaz.
     - **Ctrl+Z** desfaz e **Ctrl+Shift+Z** / **Ctrl+Y** refaz as edições (divisórias, junções, fades, seções
       desativadas, resets). As edições ficam guardadas na sessão do navegador e o modo volta aberto se o popup fechar;
   - chave **Enviar cookies deste site** (ligada por padrão, lembrada por site) e o atalho
