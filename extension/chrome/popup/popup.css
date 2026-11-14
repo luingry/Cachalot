@@ -1038,6 +1038,44 @@ body.has-transient {
   font-variant-numeric: tabular-nums;
 }
 
+/* the tempo: a click types the right one */
+.tr-bpm {
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: text;
+}
+
+.tr-bpm:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tr-bpm.is-manual {
+  color: var(--accent-text);
+}
+
+.tr-bpm-input {
+  width: 52px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.tr-bpm-input.is-invalid {
+  border-color: var(--danger);
+}
+
 .tr-wave {
   position: relative;
   height: 156px;
@@ -1208,6 +1246,46 @@ body.has-transient {
 .tr-merge:hover {
   background: var(--accent);
   color: #1a0f08;
+}
+
+/* drags the hovered section (keeps its length): a pill centered right above the hover tools */
+.tr-move {
+  position: absolute;
+  width: 30px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(20, 20, 19, 0.92);
+  color: var(--text);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  touch-action: none;
+  animation: pop-fade var(--mid) var(--ease);
+}
+
+.tr-move svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tr-move:hover {
+  background: var(--surface-3);
+  color: var(--accent-text);
+}
+
+/* recut from the transient marks: lit while the sections come from them */
+.tr-recut {
+  flex: none;
+  color: var(--text-2);
+}
+
+.tr-recut[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.tr-recut:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .tr-play {
