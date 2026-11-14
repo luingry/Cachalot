@@ -5,6 +5,69 @@ Antes de investigar um erro novo, consulte esta lista.
 
 ---
 
+## -26. Modo transiente: a divisão de seções não caía na entrada dos instrumentos (drop depois de uma subida)
+
+**Sintoma:** em músicas com introdução/subida e drop (ex.: Öspiel - The Second Before, drop em 13,96 s), a divisória
+ficava ~100–200 ms antes da entrada dos instrumentos; em 4:1 aparecia ainda uma seção de 60 ms no começo.
+**Causa:** (1) o compasso 1 ia para o primeiro golpe ≥ 0,3, que era uma batida da subida (anacruse) 0,18 s antes do
+drop; (2) `placeOnAttack` pegava a *subida mais íngreme* da energia, e um bumbo que entra sobre uma subida alta continua
+crescendo por dezenas de ms: o ponto mais íngreme era um ciclo posterior, então o onset do drop ficava 32 ms atrasado;
+(3) a grade contada para trás a partir do compasso 1 deixava uma linha em 0,06 s, logo acima de `LEAD_IN_S`.
+**Solução:** `musicStart` troca o primeiro golpe por um bem mais forte (≥ 1,5× e ≥ 0,5) que venha a menos de 0,45
+batida dele; `placeOnAttack` escolhe o maior *degrau* (energia dos próximos ~3 ms ÷ média dos ~10 ms antes, só entre
+degraus que chegam a ¼ do pico); entrada mais curta que ¼ da seção (no máximo ¼ de batida) junta-se à primeira seção.
+Efeito colateral bom: o BPM da faixa saiu exato (69,01, metade de 138) em vez de 68,65. Teste:
+`a drop after a build-up…` em `tests/transients.test.mjs`. Para medir uma faixa real: baixar o áudio, converter com
+`ffmpeg -ac 1 -ar 22050 -f f32le` e rodar `analyze`/`detectCuts` de `src/lib/transients.js` num script Node.
+O andamento na oitava errada foi resolvido na -27.
+
+---
+
+## -28. Modo transiente: divisões certas no começo e cada vez mais fora do compasso perto do fim
+
+**Sintoma:** os trechos do início caíam no compasso, mas quanto mais perto do fim, mais fora (na faixa de teste, até
+~50 ms antes/depois do bumbo).
+**Causa:** `trackBeats` "seguia a música": cada batida era puxada metade do caminho até o golpe forte mais próximo
+(até 100 ms). Em músicas sincopadas ela grudava em golpes fora do tempo e o espaçamento das batidas variava de 385 a
+484 ms (o certo era 434,7); o erro ia se acumulando e não voltava. O ajuste fino do BPM também era puxado por chimbal
+e percussão tocados de propósito um pouco à frente/atrás do bumbo.
+**Solução:** grade como a de CDJ/rekordbox: `tempoMap` dá uma grade fixa (compasso 1 + BPM exato, batida k em
+origem + k × batida). O BPM sai de um ajuste por mínimos quadrados na música inteira, com tolerância caindo até 20 ms,
+usando só o grave (bumbo/baixo) quando há ≥ 32 golpes nele. Para música com andamento que varia (banda sem click), uma
+grade dinâmica: uma reta por 4 compassos (começo progressivo: 4, 8, 16 batidas a partir do compasso 1), unidas nas
+emendas, nunca uma batida puxada sozinha; usada só se põe 15 % mais golpes nas batidas que a fixa. Na faixa real, o
+bumbo fica a ±11 ms da grade do começo ao fim, sem tendência; nos sintéticos, ≤ 2 ms na última batida de 96
+compassos, depois de um breakdown de 16 compassos, a 128,37 BPM; ≤ 8 ms numa banda acelerando 3 %. Testes: `grid: …`
+em `tests/tempo.test.mjs`.
+**Depois (mesma queixa, "a grade do fundo está mais certa que os trechos"):** o `cutAt` ainda puxava cada corte para
+*qualquer* golpe audível até 30 ms antes da linha. Nessa faixa, clap/shaker/chimbal vêm 20–40 ms à frente do tempo de
+propósito, então 132 de 186 cortes em 1:1 saíam da linha (até −30 ms, alternando a cada compasso). Agora o corte fica
+na linha ou vai para o golpe *do próprio tempo*: o mais forte a até 15 ms, ou um bumbo/baixo forte até 30 ms adiantado.
+Resultado em 1:1: todos a ≤ 15 ms da linha, quase todos a 0–5 ms.
+
+---
+
+## -27. Modo transiente: BPM na metade (69 em vez de 138), em 2/3 (DnB 174 → 116) ou o dobro
+
+**Sintoma:** o popup mostrava 69 BPM numa faixa de 138; DnB saía 116, trap 70, dubstep a 143 saía 95. Com isso "1
+compasso" valia 2 compassos reais e 4:1 dava 16 blocos em vez de 8.
+**Causa:** `estimateTempo` pegava o pico da autocorrelação com um prior largo em 120 BPM (0,9 oitava). Num groove que
+se repete a cada meio compasso (bumbo em 1 e 3, clap em 2 e 4, baixo 3-3-2) a autocorrelação em 2 tempos (0,68) passa
+a de 1 tempo (0,46); com colcheias em tudo, 1,5 e 3 tempos também se repetem e viravam "o tempo". Picos de onset de 1
+quadro também faziam lags inteiros ganharem de lags fracionários.
+**Solução:** (1) curva suavizada (±2 quadros) e autocorrelação por FFT; (2) o metro: o período cujo ¼, ½, 2× e 4×
+também se repetem (escada binária, elimina 3:2); (3) a oitava: a que cai em [90, 180) BPM, como DJ software e lojas
+mostram — se for tocada (alguma banda, a soma ou o grave repete naquele período, medido entre o nível típico e o mais
+forte da curva), senão uma oitava abaixo; ≥ 160 sem nada entre os golpes vira a metade (hip-hop a 85). O compasso 1
+também exige que a música continue depois do golpe (ruído que começa do silêncio digital não conta). Avaliado com
+`tests/songs.mjs` (11 gêneros sintéticos; limpo, ±10 ms + chiado + intro): 62/62 em cada varredura, faixa real 138,01.
+Testes: `tests/tempo.test.mjs`. Ambiguidade que sobra por natureza: hip-hop 85–89 com chimbal em semicolcheias sai no
+dobro, e balada lenta com colcheias também (mesmo padrão que um 170 / 144 real).
+A bandeira do compasso 1 não é mais posta pela detecção: fica em 0 s até o usuário arrastá-la (a fase da grade
+continua detectada, só a bandeira não se move sozinha).
+
+---
+
 ## -25. "Instalar" no assistente abria uma janela nova e vazia do Chrome em vez da página de extensões
 
 **Sintoma:** com o Chrome aberto, o assistente da extensão abria outra janela (página nova), não `chrome://extensions`.

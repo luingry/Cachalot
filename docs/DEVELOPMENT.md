@@ -41,10 +41,15 @@ A extensão transforma o cartão de uma mídia na waveform do áudio, cortada no
    viram um `aeval` por amostra com ganho `x^p`, `p = 4^-curva` (a mesma fórmula de `fadeGain` na extensão).
 3. **Extensão** (`src/lib/transients.js`, `popup/transient.js`): fluxo espectral multibanda (5 faixas normalizadas
    cada uma, estilo SuperFlux), picos com limiar adaptativo e força relativa, ataque refinado na energia fina,
-   BPM por autocorrelação com preferência por ~120, fase do tempo e tempo forte pelo grave. Os tempos são
-   rastreados (`trackBeats`: cada tempo puxado até a batida forte vizinha) e as grades (`gridLines`) cortam em cada
-   linha, então a seção tem o tamanho da divisão; a sensibilidade filtra os candidatos do Auto e os ataques em que um
-   corte de grade pode grudar (até 15 ms). Tudo recalcula em tempo real. As edições do usuário (divisórias fixadas,
+   BPM por autocorrelação (por FFT, curva suavizada): o metro pela escada binária (¼, ½, 1, 2 e 4× o período se
+   repetem) e a oitava em [90, 180) se for tocada (`estimateTempo`); o compasso 1 no primeiro golpe da música (uma
+   anacruse bem mais fraca logo antes do drop não conta). `refineTempo` ajusta o BPM por mínimos quadrados na música
+   inteira (no grave, tolerância até 20 ms) e `tempoMap` dá a grade: fixa (origem + k × tempo) ou, se a música varia,
+   dinâmica (uma reta por 4 compassos). `trackBeats` só lê essa grade e `gridLines` corta em cada linha, então a
+   seção tem o tamanho da divisão. Com `detect` (caixa *Auto-detect transient*, sempre desligada ao abrir) o corte
+   vai para o ataque do próprio tempo (`cutAt`) e a sensibilidade filtra os candidatos do Auto; sem ela o corte fica
+   exatamente na linha. Avaliação: gêneros sintéticos de `tests/songs.mjs` em `tests/tempo.test.mjs`. Tudo
+   recalcula em tempo real. As edições do usuário (divisórias fixadas,
    suprimidas, início/fim, `origin` = início da música marcado pela bandeira) sobrevivem a uma nova detecção.
    `withOrigin` põe o compasso 1 no início marcado: a grade é contada dali e, antes dele, não há cortes.
 

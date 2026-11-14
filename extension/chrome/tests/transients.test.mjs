@@ -183,6 +183,40 @@ test("bar 1 starts with the music, so the first section is a full bar like the o
   }
 });
 
+test("a drop after a build-up: bar 1 is the drop, not the pickup before it, and the cut is on its attack", () => {
+  // A loud noise build-up with a snare pickup 0.15 s before the drop (the first hit strong enough: it was bar 1), then
+  // the drop — a crash and a kick on every beat, whose low end jumps in and swells for ~30 ms more (its steepest rise
+  // is a later cycle: the old search put the onset a few ms into the drop, ~30 ms in a real song).
+  const beat = 0.5;
+  const drop = 4.003;
+  const length = Math.ceil((drop + 16 * 4 * beat + 0.5) * SR);
+  const out = new Float32Array(length);
+  const noise = rng(11);
+  const add = (t, dur, fn) => {
+    const a = Math.round(t * SR);
+    for (let i = 0; i < dur * SR && a + i < length; i++) out[a + i] += fn(i / SR);
+  };
+  add(0, drop + 0.3, (x) => 0.25 * Math.min(1, x / drop) * noise()); // the build-up, louder and louder, on into the drop
+  add(drop - 0.15, 0.1, (x) => 0.5 * Math.exp(-x * 30) * noise()); // the pickup
+  add(drop, 0.4, (x) => 0.5 * Math.exp(-x * 6) * noise()); // the crash on the drop
+  for (let b = 0; b < 64; b++) {
+    const t = drop + b * beat;
+    add(t, 0.3, (x) => (0.5 + 0.5 * (1 - Math.exp(-x * 40))) * Math.exp(-x * 6) * Math.sin(2 * Math.PI * (45 + 60 * Math.exp(-x * 30)) * x));
+    add(t + beat / 2, 0.04, (x) => 0.08 * Math.exp(-x * 90) * noise());
+  }
+  const a = analyze(out);
+  const hit = a.onsets.reduce((x, y) => (Math.abs(y.time - drop) < Math.abs(x.time - drop) ? y : x));
+  assert.ok(hit.time <= drop && hit.time > drop - 0.004, `the drop's onset is on its attack: ${hit.time.toFixed(4)}`);
+  assert.ok(Math.abs(a.origin - drop) < 0.01, `bar 1 at ${a.origin.toFixed(4)}, the drop at ${drop}`);
+  for (const grid of ["1", "4:1", "auto"]) {
+    const cuts = detectCuts(a, { sensitivity: 0.5, grid });
+    const first = cuts.find((c) => c > drop - 0.5);
+    assert.ok(first <= drop && first > drop - 0.004, `${grid}: the drop's cut is at ${first.toFixed(4)}`);
+  }
+  // the grid counted back from the drop leaves no sliver at the very start
+  assert.ok(detectCuts(a, { sensitivity: 0.5, grid: "1" })[0] > 0.1);
+});
+
 test("the start the user marks becomes bar 1: the grid moves with it and the lead-in is one section", () => {
   const loop = drumLoop();
   const a = analyze(loop.samples);
@@ -429,4 +463,16 @@ test("formatTime", () => {
   assert.equal(formatTime(7.123), "0:07.12");
   assert.equal(formatTime(83.4567, 3), "1:23.457");
   assert.equal(formatTime(61, 0), "1:01");
+});
+
+test("without the transient detection every cut sits exactly on the grid (Auto counts as 1:1)", () => {
+  // a hit 12 ms late and one 25 ms early: with the detection the cuts go onto them, without it they stay on the lines
+  const onsets = [0, 0.5, 0.975, 1.5, 2.012, 2.5, 3, 3.5].map((time) => ({ time, strength: 1, band: 0 }));
+  const analysis = { onsets, duration: 4, beat: 0.5, bar: 2, origin: 0, bpm: 120 };
+  const grid = detectCuts(analysis, { sensitivity: 0.5, grid: "4", detect: false });
+  assert.deepEqual(grid.map((t) => Math.round(t * 1000) / 1000), [0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
+  const snapped = detectCuts(analysis, { sensitivity: 0.5, grid: "4" });
+  assert.ok(snapped.includes(0.975) && snapped.includes(2.012), String(snapped));
+  assert.deepEqual(detectCuts(analysis, { grid: "auto", detect: false }), detectCuts(analysis, { grid: "1", detect: false }));
+  for (const s of [0, 0.5, 1]) assert.deepEqual(detectCuts(analysis, { sensitivity: s, grid: "4", detect: false }), grid, "no sensitivity");
 });

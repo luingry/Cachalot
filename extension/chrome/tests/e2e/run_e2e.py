@@ -956,6 +956,27 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     info = popup.locator(".tr-info").inner_text()
     c("transient: tempo detected (120 BPM)", any(f"{b} BPM" in info for b in (119, 120, 121)), info)
     shot(popup, "05a-transient.png")
+    c("transient: a new song opens on 1:1", popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true")
+    # "Auto-detect transient", right of Loop: always off at first; off, every cut sits exactly on the tempo's grid
+    det = ".tr-controls-top > .tr-detect input[type=checkbox]"
+    c("transient: Auto-detect transient checkbox right of Loop, off", popup.locator(det).count() == 1
+      and not popup.locator(det).is_checked() and "Auto-detect transient" in popup.locator(".tr-detect").inner_text()
+      and popup.eval_on_selector(".tr-detect", "e => e.getBoundingClientRect().left")
+      > popup.eval_on_selector(".tr-loop", "e => e.getBoundingClientRect().right"))
+    c("transient: without the detection the sensitivity is off", popup.locator(".tr-sens input").is_disabled())
+    inner = dividers_now()[1:-1]
+    gaps = [b - a for a, b in zip(inner, inner[1:])]
+    c("transient: without the detection 1:1 cuts exactly on the grid (equal bars)",
+      len(gaps) >= 6 and max(gaps) - min(gaps) < 3e-4, str(gaps))
+    popup.locator(".tr-grid-btn:text-is('Auto')").click()
+    c("transient: picking Auto turns the detection on", popup.locator(det).is_checked()
+      and not popup.locator(".tr-sens input").is_disabled())
+    popup.locator(".tr-detect").click()
+    c("transient: turning it off on Auto goes back to 1:1", not popup.locator(det).is_checked()
+      and popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true")
+    popup.locator(".tr-detect").click()
+    c("transient: with the detection on, 1:1 cuts move onto the attacks",
+      popup.locator(det).is_checked() and dividers_now()[1:-1] != inner, str(dividers_now()[1:4]))
 
     def set_sens(value):
         popup.eval_on_selector(".tr-sens input", "(i, v) => { i.value = String(v); i.dispatchEvent(new Event('input')); }", value)
@@ -975,10 +996,13 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     set_sens(50)
     c("transient: 1:32 and 1:64 are offered and cut at least as finely as 1:8",
       grid64 >= grid32 >= eighths and popup.locator(".tr-grid-btn").all_inner_texts()
-      == ["1:1", "1:2", "1:4", "1:8", "1:16", "1:32", "1:64", "Auto", "2:1", "4:1", "8:1", "16:1", "32:1"],
+      == ["32:1", "16:1", "8:1", "4:1", "2:1", "1:1", "1:2", "1:4", "1:8", "1:16", "1:32", "1:64", "Auto"],
       f"{eighths} {grid32} {grid64}")
-    c("transient: 2:1 … 32:1 sit in a row below the others",
-      popup.locator(".tr-grids > .tr-grid-bars .tr-grid-btn").all_inner_texts() == ["2:1", "4:1", "8:1", "16:1", "32:1"])
+    tops = popup.eval_on_selector_all(".tr-grid-btn", "bs => bs.map(b => Math.round(b.getBoundingClientRect().top))")
+    c("transient: every division sits in one row, below the sensitivity, Loop and tempo line",
+      popup.locator(".tr-grid").count() == 1 and len(set(tops)) == 1
+      and popup.locator(".tr-controls-top > .tr-sens").count() == 1 and popup.locator(".tr-controls-top > .tr-loop").count() == 1
+      and popup.eval_on_selector(".tr-controls-top", "e => e.getBoundingClientRect().bottom") <= min(tops), str(tops))
     # 8 bars from 0.37 s: 4:1 cuts at 0.37 (after the intro), 8.37 and 16.37 (the tail) -> 4 sections
     four = pick_grid("4:1")
     c("transient: 4:1 makes sections of four bars", four == 4, str(four))
@@ -1067,8 +1091,8 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     c("transient: the folder button asks Cachalot to open it", wait_request("/transient/open", n) is not None)
 
     # the "music starts here" flag in the ruler: dragging it moves bar 1, the grid follows and the intro is one section
-    origin0 = float(ds("origin"))
-    c("transient: the start flag sits on the detected start (0.37 s)", abs(origin0 - 0.37) < 0.01, str(origin0))
+    origin0 = float(ds("flag"))
+    c("transient: the start flag sits at the start of the audio, not on a detected start", origin0 == 0, str(origin0))
     yf = box["y"] + box["height"] - 6
     xf = x_of(origin0) + 6
     popup.mouse.move(xf, yf)
@@ -1078,7 +1102,7 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     popup.mouse.move(xf + 30, yf, steps=2)
     popup.mouse.up()
     popup.keyboard.up("Alt")
-    origin1 = float(ds("origin"))
+    origin1 = float(ds("flag"))
     marked = dividers_now()
     beat_s = 0.5
     c("transient: dragging the flag moves the start", abs(origin1 - (origin0 + 30 / box["width"] * duration)) < 0.02,
@@ -1088,8 +1112,8 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     shot(popup, "05b3-transient-start.png")
     popup.mouse.dblclick(x_of(origin1) + 6, yf)
     popup.wait_for_timeout(300)
-    c("transient: a double click on the flag goes back to the detected start",
-      abs(float(ds("origin")) - origin0) < 1e-3 and dividers_now() == dividers, ds("origin"))
+    c("transient: a double click on the flag puts it back at the start of the audio",
+      float(ds("flag")) == 0 and dividers_now() == dividers, ds("flag"))
 
     # drag the 5th divider 10 px to the right (Alt: no snapping; the next one is a beat, ~16 px, away)
     # (grabbed above the middle: the middle of a divider holds its merge button)
@@ -1372,13 +1396,18 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     shot(popup, "05h-transient-overview.png")
     popup.locator(".tr-play").click()
     kept = ds("dividers")
+    kept_grid = popup.locator(".tr-grid-btn[aria-pressed=true]").inner_text()
     popup.wait_for_timeout(400)  # edits are saved 300 ms after the last change
 
     open_popup()
     popup.wait_for_selector(".transient.is-ready", timeout=15000)
+    c("transient: reopened, Auto-detect transient is off again", not popup.locator(det).is_checked())
+    popup.locator(".tr-detect").click()
     c("transient: reopening the popup brings the view back with its edits",
       ds("dividers") == kept and int(ds("active")) == int(ds("sections")) - 1 and ds("fades") == kept_fades,
       f"{ds('dividers')[:80]}…")
+    c("transient: and with the division chosen for this song",
+      popup.get_attribute(f".tr-grid-btn:text-is('{kept_grid}')", "aria-pressed") == "true", kept_grid)
     popup.locator(".tr-close").click()
     c("transient: closing restores the card and the popup width", popup.evaluate(
         "() => !document.querySelector('.transient') && !document.body.classList.contains('has-transient')"

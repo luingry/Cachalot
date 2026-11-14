@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,16 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.2.0",
+      "notes": [
+        "Transient mode finds the tempo you would count: a half-time groove at 138 BPM shows 138, not 69, and drum & bass, trap, dubstep, hip-hop and ballads come out right too.",
+        "Bars and sections stay in time from the first bar to the last: a fixed beat grid like a DJ player's, and one that follows the band for songs played without a click.",
+        "New \"Auto-detect transient\" switch, off whenever you open a song: off, every section sits exactly on the beat grid; on, cuts land on each beat's attack and Auto is available.",
+        "Every division on one row, from 32 bars down to 1/64, with sensitivity, Loop and the new switch above it; a new song opens on 1:1.",
+        "The bar 1 flag starts at the beginning of the audio and only moves when you drag it; cuts after a build-up land right where the drop comes in."
+      ]
+    },
     {
       "version": "2.1.1",
       "notes": [

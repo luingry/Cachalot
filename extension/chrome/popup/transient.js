@@ -47,6 +47,13 @@ import {
 } from "../src/lib/transients.js";
 
 const SETTINGS_KEY = "transientSettings";
+
+/** Bars per section of a grid: "32:1" = 32 … "1" = 1 … "64" = 1/64 (Auto: 0). */
+function barsOf(grid) {
+  const many = /^(\d+):1$/.exec(grid);
+  return many ? Number(many[1]) : grid === "auto" ? 0 : 1 / Number(grid);
+}
+
 const EDITS_PREFIX = "transientEdits:";
 const POLL_MS = 500;
 const HANDLE_PX = 6;
@@ -87,9 +94,9 @@ const GRID_TITLES = {
   auto: "Compassos primeiro: cada compasso começa uma seção e, dentro dele, corta nos transientes (em 1/16)",
 };
 const RULER_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
-const ORIGIN_TITLE = "Início da música (compasso 1): arraste para mudar, as seções andam junto · Alt solta do transiente · duplo clique volta ao detectado";
+const ORIGIN_TITLE = "Compasso 1: fica no começo do áudio; arraste para marcar onde a música começa e as seções andam junto · Alt solta do transiente · duplo clique volta ao começo";
 const HINT =
-  "A bandeira azul na régua marca onde a música começa · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Ctrl+Z desfaz";
+  "Arraste a bandeira azul na régua para marcar o compasso 1 · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Ctrl+Z desfaz";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ICONS = {
@@ -174,7 +181,8 @@ export function createTransientView({ request, title, message, onClose }) {
     peaks: null,
     gain: 1,
     analysis: null,
-    settings: { sensitivity: DEFAULT_SENSITIVITY, grid: "auto", loop: false },
+    settings: { sensitivity: DEFAULT_SENSITIVITY, grid: "1", loop: false, detect: false }, // grid: per song, a new one
+    // opens on 1:1; detect ("Auto-detect transient") always starts off: the cuts sit exactly on the tempo's grid
     edits: emptyEdits(),
     disabled: new Set(),
     cuts: [],
@@ -236,21 +244,20 @@ export function createTransientView({ request, title, message, onClose }) {
   sensInput.setAttribute("aria-label", "Sensibilidade da detecção");
   const sensValue = el("span", "tr-sens-value", "50");
   sens.append(el("span", "tr-label", "Sens."), sensInput, sensValue);
-  // the divisions of a bar on top, several bars per section right below
-  const grid = el("div", "tr-grids");
+  // every division in one row, from the longest sections to the shortest (32 bars … 1/64 of a bar), then Auto
+  const grid = el("div", "tr-grid");
   grid.setAttribute("role", "group");
   grid.setAttribute("aria-label", "Divisão das seções");
-  const gridRow = el("div", "tr-grid");
-  const barsRow = el("div", "tr-grid tr-grid-bars");
-  grid.append(gridRow, barsRow);
   const gridButtons = new Map();
-  for (const g of GRIDS) {
+  const order = [...GRIDS].sort((a, b) => (a === "auto") - (b === "auto") || barsOf(b) - barsOf(a));
+  for (const g of order) {
     const b = el("button", "tr-grid-btn", GRID_LABELS[g]);
     b.type = "button";
     b.title = GRID_TITLES[g];
     b.addEventListener("click", () => setGrid(g));
     gridButtons.set(g, b);
-    (MULTI_BAR_GRIDS.includes(g) ? barsRow : gridRow).append(b);
+    if (g === "auto") grid.append(el("span", "tr-grid-sep"));
+    grid.append(b);
   }
   const info = el("span", "tr-info");
   const loop = el("label", "tr-loop");
@@ -258,7 +265,16 @@ export function createTransientView({ request, title, message, onClose }) {
   const loopInput = el("input");
   loopInput.type = "checkbox";
   loop.append(loopInput, el("span", "", "Loop"));
-  controls.append(sens, grid, loop, info);
+  // off: every section exactly on the grid built on the tempo; on: the detection (Auto, sensitivity, cuts on attacks)
+  const detect = el("label", "tr-detect");
+  detect.title =
+    "Auto-detect transient: os cortes se ajustam aos transientes detectados (Auto, sensibilidade, corte no ataque). Desmarcado: cada trecho exatamente na grade do BPM";
+  const detectInput = el("input");
+  detectInput.type = "checkbox";
+  detect.append(detectInput, el("span", "", "Auto-detect transient"));
+  const top = el("div", "tr-controls-top");
+  top.append(sens, loop, detect, info);
+  controls.append(top, grid);
 
   const wave = el("div", "tr-wave");
   const canvas = el("canvas", "tr-canvas");
@@ -399,7 +415,6 @@ export function createTransientView({ request, title, message, onClose }) {
       const saved = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
       if (saved && typeof saved === "object") {
         if (Number.isFinite(saved.sensitivity)) v.settings.sensitivity = clamp(saved.sensitivity, 0, 1);
-        if (GRIDS.includes(saved.grid)) v.settings.grid = saved.grid;
         if (typeof saved.loop === "boolean") v.settings.loop = saved.loop;
       }
     } catch {
@@ -410,7 +425,8 @@ export function createTransientView({ request, title, message, onClose }) {
   }
 
   function saveSettings() {
-    chrome.storage.local.set({ [SETTINGS_KEY]: { ...v.settings } }).catch(() => {});
+    const { sensitivity, loop } = v.settings; // the grid is per song (saveEdits)
+    chrome.storage.local.set({ [SETTINGS_KEY]: { sensitivity, loop } }).catch(() => {});
   }
 
   /** The cuts the user moved, added or removed and the disabled sections, per song for this browser session. */
@@ -420,22 +436,29 @@ export function createTransientView({ request, title, message, onClose }) {
       if (saved?.edits) v.edits = { ...emptyEdits(), ...saved.edits };
       if (Array.isArray(saved?.disabled)) v.disabled = new Set(saved.disabled);
       if (saved?.fades && typeof saved.fades === "object") v.fades = saved.fades;
+      // Auto needs the detection, and it starts off
+      if (GRIDS.includes(saved?.grid)) v.settings.grid = saved.grid === "auto" && !v.settings.detect ? "1" : saved.grid;
     } catch {
       // a fresh start
     }
+    paintControls();
   }
 
   function saveEdits() {
     clearTimeout(v.saveTimer);
     v.saveTimer = setTimeout(() => {
       chrome.storage.session
-        .set({ [EDITS_PREFIX + v.jobId]: { edits: v.edits, disabled: [...v.disabled], fades: v.fades } })
+        .set({ [EDITS_PREFIX + v.jobId]: { edits: v.edits, disabled: [...v.disabled], fades: v.fades, grid: v.settings.grid } })
         .catch(() => {});
     }, 300);
   }
 
   function paintControls() {
     loopInput.checked = v.settings.loop;
+    detectInput.checked = v.settings.detect;
+    // the sensitivity only steers the detection
+    sensInput.disabled = !v.settings.detect;
+    sens.classList.toggle("is-off", !v.settings.detect);
     const s = Math.round(v.settings.sensitivity * 100);
     sensInput.value = String(s);
     sensValue.textContent = String(s);
@@ -445,10 +468,21 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function setGrid(g) {
     v.settings.grid = g;
+    if (g === "auto") v.settings.detect = true; // Auto is the detection itself
     paintControls();
-    saveSettings();
+    saveEdits();
     if (v.analysis) recompute();
   }
+
+  detectInput.addEventListener("change", () => {
+    v.settings.detect = detectInput.checked;
+    if (!v.settings.detect && v.settings.grid === "auto") {
+      v.settings.grid = "1"; // Auto without the detection is not a grid: back to bars
+      saveEdits();
+    }
+    paintControls();
+    if (v.analysis) recompute();
+  });
 
   let sensFrame = 0;
   sensInput.addEventListener("input", () => {
@@ -460,6 +494,11 @@ export function createTransientView({ request, title, message, onClose }) {
   sensInput.addEventListener("change", saveSettings);
 
   // ---- Model ----------------------------------------------------------------
+
+  /** Where the flag stands: the start of the audio until the user drags it (live while dragging). */
+  function flagTime() {
+    return v.originDrag ? v.originDrag.time : v.edits.origin ?? 0;
+  }
 
   /** The analysis with bar 1 where the user marked the start of the music (live while the flag is dragged). */
   function gridded() {
@@ -477,6 +516,7 @@ export function createTransientView({ request, title, message, onClose }) {
     for (const k of [...v.selected]) if (!keys.has(k)) v.selected.delete(k);
     node.dataset.duration = String(v.analysis.duration);
     node.dataset.origin = String(Math.round(gridded().origin * 10000) / 10000);
+    node.dataset.flag = String(Math.round(flagTime() * 10000) / 10000);
     node.dataset.dividers = JSON.stringify(v.dividers.map((d) => Math.round(d.time * 10000) / 10000));
     node.dataset.fades = JSON.stringify(v.fades);
     updateInfo();
@@ -653,9 +693,10 @@ export function createTransientView({ request, title, message, onClose }) {
         ctx.fillRect(Math.round(xOf(line.time)), top, 1, waveH);
       }
     }
-    // bar numbers (bar 1 = where the music starts): every bar, or every 4 / 16 when they get close
+    // bar numbers: bar 1 is the flag the user placed, else the first bar of the grid from the start of the audio
     const pxPerBar = (a.bar / span()) * w;
     const every = [1, 4, 16, 64].find((n) => n * pxPerBar >= 28);
+    const bar1 = a.originSet ? a.origin : a.origin - Math.floor((a.origin + 0.25 * a.bar) / a.bar) * a.bar;
     if (every) {
       ctx.font = `9px ${colors.font}`;
       ctx.textAlign = "left";
@@ -663,7 +704,7 @@ export function createTransientView({ request, title, message, onClose }) {
       ctx.fillStyle = "rgba(255, 255, 255, 0.32)";
       for (const line of gridLines(a, "1")) {
         if (line.time < v.start - a.bar || line.time > v.end) continue;
-        const n = Math.round((line.time - a.origin) / a.bar) + 1;
+        const n = Math.round((line.time - bar1) / a.bar) + 1;
         if (n < 1 || (n - 1) % every !== 0) continue;
         const x = xOf(line.time);
         if (x >= -2 && x < w - 12) ctx.fillText(String(n), Math.round(x) + 3, bottom - 7);
@@ -699,8 +740,8 @@ export function createTransientView({ request, title, message, onClose }) {
 
     drawFades(sections, top, bottom);
 
-    // the transients that pass the sensitivity, colored by the band that carried them (low → high)
-    const threshold = thresholdFor(v.settings.sensitivity);
+    // the transients that pass the sensitivity, colored by the band that carried them (low → high): with the detection
+    const threshold = v.settings.detect ? thresholdFor(v.settings.sensitivity) : Infinity;
     for (const o of a.onsets) {
       if (o.time < v.start || o.time > v.end || o.strength < threshold) continue;
       ctx.fillStyle = colors.ticks[o.band] || colors.text;
@@ -767,8 +808,8 @@ export function createTransientView({ request, title, message, onClose }) {
       if (x < w - 30) ctx.fillText(formatTime(t, digits), x + 3, h - 3);
     }
 
-    // where the music starts (bar 1): a dashed line over the waveform and a flag in the ruler to drag
-    const ox = Math.round(xOf(a.origin));
+    // bar 1 as the user marks it: a dashed line over the waveform and a flag in the ruler to drag
+    const ox = Math.round(xOf(flagTime()));
     if (ox >= -14 && ox <= w + 1) {
       const hotOrigin = v.hover.origin || v.originDrag;
       ctx.fillStyle = colors.origin;
@@ -788,7 +829,7 @@ export function createTransientView({ request, title, message, onClose }) {
   /** The "music starts here" flag in the ruler is under the pointer. */
   function originHandleAt(x, y) {
     if (!v.analysis || y < size.h - LANE_BOTTOM - 3) return false;
-    const ox = xOf(gridded().origin);
+    const ox = xOf(flagTime());
     return x >= ox - 4 && x <= ox + 15;
   }
 
@@ -1329,7 +1370,7 @@ export function createTransientView({ request, title, message, onClose }) {
       return;
     }
     if (e.button === 0 && originHandleAt(x, y)) {
-      const at = gridded().origin;
+      const at = flagTime();
       v.originDrag = { time: at, grab: x - xOf(at), moved: false }; // keeps where the flag was grabbed
       canvas.style.cursor = "ew-resize";
       return;
@@ -1409,7 +1450,7 @@ export function createTransientView({ request, title, message, onClose }) {
       const { time, moved } = v.originDrag;
       v.originDrag = null;
       tip.hidden = true;
-      if (moved && !cancelled && Math.abs(time - withOrigin(v.analysis, v.edits.origin).origin) > 1e-6) {
+      if (moved && !cancelled && Math.abs(time - (v.edits.origin ?? 0)) > 1e-6) {
         change(() => {
           v.edits = { ...v.edits, origin: time };
         });
