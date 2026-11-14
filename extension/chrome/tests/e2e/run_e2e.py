@@ -1408,6 +1408,7 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
       f"{ds('dividers')[:80]}…")
     c("transient: and with the division chosen for this song",
       popup.get_attribute(f".tr-grid-btn:text-is('{kept_grid}')", "aria-pressed") == "true", kept_grid)
+    _transient_tools(c, popup, ds, dividers_now, pick_grid, det)
     popup.locator(".tr-close").click()
     c("transient: closing restores the card and the popup width", popup.evaluate(
         "() => !document.querySelector('.transient') && !document.body.classList.contains('has-transient')"
@@ -1415,6 +1416,110 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     open_popup()
     c("transient: once closed it stays closed", popup.locator(".transient").count() == 0)
     popup.set_viewport_size({"width": 360, "height": 640})
+
+
+def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
+    """The recut from the transient marks, the tempo typed by hand and moving a section (detection on, at first)."""
+    close = lambda a, b, tol=2e-3: len(a) == len(b) and all(abs(x - y) < tol for x, y in zip(a, b))  # noqa: E731
+
+    # recalcular: right of "Auto-detect transient", only with it on; one section per transient mark; Ctrl+Z undoes it
+    recut = ".tr-controls-top > .tr-detect + .tr-recut"
+    c("transient: recut button (icon) right of Auto-detect transient, enabled with the detection",
+      popup.locator(recut).count() == 1 and popup.locator(recut).is_enabled() and popup.locator(recut + " svg").count() == 1)
+    pick_grid("1:4")
+    before = ds("dividers")
+    popup.locator(recut).click()
+    c("transient: recut makes the sections from the transient marks (no division pressed)",
+      popup.get_attribute(recut, "aria-pressed") == "true" and popup.locator(".tr-grid-btn[aria-pressed=true]").count() == 0
+      and ds("dividers") != before, ds("dividers")[:80])
+    popup.locator(".tr-undo").click()
+    c("transient: undoing the recut brings the dividers and the division back",
+      ds("dividers") == before and popup.get_attribute(".tr-grid-btn:text-is('1:4')", "aria-pressed") == "true"
+      and popup.get_attribute(recut, "aria-pressed") == "false")
+    popup.locator(".tr-detect").click()
+    c("transient: turning the detection off goes back to the default division (1:1), recut off",
+      not popup.locator(det).is_checked() and popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true"
+      and popup.locator(recut).is_disabled())
+
+    # the tempo: a click types it, the grid is redone on it; empty goes back to the detected one
+    def gaps():
+        inner = dividers_now()[1:-1]
+        return [round(b - a, 3) for a, b in zip(inner, inner[1:])]
+
+    popup.locator(".tr-bpm").click()
+    popup.locator(".tr-bpm-input").fill("60")
+    popup.keyboard.press("Enter")
+    info = popup.locator(".tr-info").inner_text()
+    c("transient: a typed 60 BPM redoes the grid (bars of 4 s)",
+      "60 BPM" in info and sum(abs(g - 4) < 2e-3 for g in gaps()) >= 2 and float(ds("bpm")) == 60, f"{info} {gaps()}")
+    popup.locator(".tr-bpm").click()
+    popup.locator(".tr-bpm-input").fill("")
+    popup.keyboard.press("Enter")
+    info = popup.locator(".tr-info").inner_text()
+    c("transient: an empty tempo goes back to the detected one",
+      any(f"{b} BPM" in info for b in (119, 120, 121)) and sum(abs(g - 2) < 2e-3 for g in gaps()) >= 2, f"{info} {gaps()}")
+
+    # moving a section: the button sits centered right above the hover tools; the section keeps its length, the
+    # space it leaves is a new disabled section, what it lands on gives way; it snaps to the grid (Alt: free)
+    canvas = popup.locator(".tr-canvas")
+    box = canvas.bounding_box()
+    popup.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    for _ in range(12):
+        popup.mouse.wheel(0, 400)  # all the song in view
+        popup.wait_for_timeout(30)
+    vs, ve = (float(x) for x in ds("view").split(","))
+
+    def vx(t):
+        return box["x"] + (t - vs) / (ve - vs) * box["width"]
+
+    d = dividers_now()
+    off = set(json.loads(ds("disabled")))
+    # two whole bars in a row (2 s each at 120 BPM), both active: the earlier steps edited some of the others
+    i = next(k for k in range(1, len(d) - 2)
+             if d[k] >= vs and d[k + 2] <= ve and abs(d[k + 1] - d[k] - 2) < 2e-3 and abs(d[k + 2] - d[k + 1] - 2) < 2e-3
+             and k not in off and k + 1 not in off)
+    length = d[i + 1] - d[i]
+    y = box["y"] + box["height"] / 2
+
+    def grab():
+        popup.mouse.move(vx((d[i] + d[i + 1]) / 2), y)
+        popup.wait_for_selector(".tr-move:not([hidden])", timeout=3000)
+        return popup.locator(".tr-move").bounding_box()
+
+    mb = grab()
+    tb = popup.locator(".tr-tools").bounding_box()
+    c("transient: the move button sits centered right above the hover tools",
+      abs((mb["x"] + mb["width"] / 2) - (tb["x"] + tb["width"] / 2)) < 1.5 and mb["y"] + mb["height"] <= tb["y"] + 0.5
+      and tb["y"] - (mb["y"] + mb["height"]) < 6, f"{mb} {tb}")
+    sections, active = int(ds("sections")), int(ds("active"))
+    shift = 0.5
+    px = shift / (ve - vs) * box["width"]
+    cx, cy = mb["x"] + mb["width"] / 2, mb["y"] + mb["height"] / 2
+    popup.keyboard.down("Alt")  # free: no snap
+    popup.mouse.move(cx, cy)
+    popup.mouse.down()
+    popup.mouse.move(cx + px, cy, steps=6)
+    popup.mouse.up()
+    popup.keyboard.up("Alt")
+    after = dividers_now()
+    moved = [(a, b) for a, b in zip(after, after[1:]) if a > d[i] + 0.05 and abs((b - a) - length) < 2e-3]
+    c("transient: dragging a section moves it keeping its length; the space left is a new disabled section",
+      int(ds("sections")) == sections + 1 and int(ds("active")) == active and moved and any(abs(t - d[i]) < 1e-3 for t in after)
+      and all(abs(t - d[i + 1]) > 1e-3 for t in after), f"{d[i]:.3f}-{d[i + 1]:.3f} -> {moved} {sections}/{active} -> {ds('sections')}/{ds('active')}")
+    popup.locator(".tr-undo").click()
+    c("transient: undoing the move puts it back", close(dividers_now(), d))
+
+    # over the whole next section, a few px short: snaps onto the bar line, the next section is gone under it
+    mb = grab()
+    cx, cy = mb["x"] + mb["width"] / 2, mb["y"] + mb["height"] / 2
+    popup.mouse.move(cx, cy)
+    popup.mouse.down()
+    popup.mouse.move(cx + (length / (ve - vs)) * box["width"] - 3, cy, steps=8)
+    popup.mouse.up()
+    c("transient: the drag snaps to the grid; the section it covers goes away and the one it left is disabled",
+      close(dividers_now(), d) and int(ds("active")) == active - 1 and i in json.loads(ds("disabled"))
+      and i + 1 not in json.loads(ds("disabled")), f"{ds('active')} {ds('disabled')}")
+    popup.locator(".tr-undo").click()
 
 
 def _music(c, ctx, popup, open_popup, ext_id, tab_id_for, items, watch, shot, poll, count, wait_request, pop_state, unhover):

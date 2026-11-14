@@ -13,7 +13,10 @@ export const ANALYSIS_RATE = 22050;
 /** Divisions per 4/4 bar: "1" = 1:1 (a bar) … "64" = 1:64; "2:1" … "32:1" = several bars; "auto" = every transient. */
 export const GRIDS = ["1", "2", "4", "8", "16", "32", "64", "2:1", "4:1", "8:1", "16:1", "32:1", "auto"];
 /** "2:1" … "32:1": sections of that many bars (phrases). */
-export const MULTI_BAR_GRIDS = ["2:1", "4:1", "8:1", "16:1", "32:1"];
+/** Not a grid: the sections go from one detected transient to the next (the "recalcular" button, needs the detection). */
+export const TRANSIENT_GRID = "transients";
+const MIN_TRANSIENT_GAP_S = 0.03; // two marks closer than this make one cut (the stronger)
+export const MULTI_BAR_GRIDS =["2:1", "4:1", "8:1", "16:1", "32:1"];
 /** Anti-click ramps at the edges of every section heard or saved (the cut rarely falls on a zero crossing). */
 export const DECLICK_IN_S = 0.002;
 export const DECLICK_OUT_S = 0.003;
@@ -621,6 +624,34 @@ export function withOrigin(analysis, origin) {
   return view;
 }
 
+export const MIN_BPM = 20;
+export const MAX_BPM = 400;
+
+/**
+ * The analysis at the tempo the user typed: a fixed grid of exactly that BPM (nothing refitted, it is what the user
+ * says), bar 1 where the detection put it. null (or anything not a tempo) keeps the detected one. The onsets stay:
+ * only the grid, and so every cut counted on it, changes.
+ */
+export function withTempo(analysis, bpm) {
+  const value = Number(bpm);
+  if (bpm == null || !Number.isFinite(value) || value < MIN_BPM || value > MAX_BPM) return analysis;
+  const beat = 60 / value;
+  const origin = analysis.origin || 0;
+  return {
+    ...analysis,
+    bpm: value,
+    bpmSet: true,
+    confidence: Math.max(analysis.confidence ?? 1, 1), // a tempo the user gave is a steady pulse (Auto counts bars)
+    beat,
+    bar: 4 * beat,
+    origin,
+    tempo: { ks: [0, 1], ts: [origin, origin + beat], dynamic: false },
+    lineCache: null,
+    beatTimes: null,
+    originCache: null,
+  };
+}
+
 // ---- Cuts: sensitivity × grid ------------------------------------------------------
 
 /** Minimum strength a transient needs at a sensitivity in [0, 1] (1 = even the faintest). */
@@ -911,23 +942,28 @@ export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid =
     return cuts;
   }
 
-  if (grid === "auto" || !GRIDS.includes(String(grid))) {
-    if ((analysis.confidence ?? 1) < AUTO_BARS_CONFIDENCE || !analysis.bar) {
-      // no steady pulse to hang bars on: a cut at every transient
-      const minGap = Math.max(0.06, (beat / 4) * 0.6);
-      const kept = [];
-      for (const o of onsets) {
-        const last = kept[kept.length - 1];
-        if (last && o.time - last.time < minGap) {
-          if (o.strength > last.strength) kept[kept.length - 1] = o;
-        } else {
-          kept.push(o);
-        }
+  /** A cut at every transient that passes the sensitivity (the marks under the waveform), on its attack. */
+  const everyTransient = (minGap) => {
+    const kept = [];
+    for (const o of onsets) {
+      const last = kept[kept.length - 1];
+      if (last && o.time - last.time < minGap) {
+        if (o.strength > last.strength) kept[kept.length - 1] = o;
+      } else {
+        kept.push(o);
       }
-      const times = kept.map((o) => o.time).filter((t) => !beforeMusic(t) && (!analysis.originSet || t - origin > MIN_SECTION_S));
-      if (analysis.originSet) times.unshift(origin);
-      return times.filter((t) => t > MIN_SECTION_S && t < duration - MIN_SECTION_S);
     }
+    const times = kept.map((o) => o.time).filter((t) => !beforeMusic(t) && (!analysis.originSet || t - origin > MIN_SECTION_S));
+    if (analysis.originSet) times.unshift(origin);
+    return times.filter((t) => t > MIN_SECTION_S && t < duration - MIN_SECTION_S);
+  };
+
+  // the user's "recalculate from the transients": one section from each mark to the next
+  if (grid === TRANSIENT_GRID) return everyTransient(MIN_TRANSIENT_GAP_S);
+
+  if (grid === "auto" || !GRIDS.includes(String(grid))) {
+    // no steady pulse to hang bars on: a cut at every transient
+    if ((analysis.confidence ?? 1) < AUTO_BARS_CONFIDENCE || !analysis.bar) return everyTransient(Math.max(0.06, (beat / 4) * 0.6));
     // Bars first: the whole song is marked in bars and every bar starts a section; inside a bar, a cut goes on
     // each 1/16 line where a transient (that passes the sensitivity) is played, on its attack.
     const step = gridStep(analysis, "16");

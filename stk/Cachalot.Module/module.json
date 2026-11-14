@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,15 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.3.0",
+      "notes": [
+        "Transient mode: a new button next to \"Auto-detect transient\" redoes the sections from the transient marks, one section from each mark to the next (Ctrl+Z undoes it).",
+        "Click the BPM to type the song's tempo: the beat grid, the divisions and the cuts on the transients are redone on it; leave it empty to go back to the detected one.",
+        "Drag a section along the song without changing its length (button above the section tools): it snaps to the grid or to the transient marks, the space it leaves becomes a disabled section, and the sections it lands on give way.",
+        "Turning \"Auto-detect transient\" off always brings the sections back to the default division (1:1)."
+      ]
+    },
     {
       "version": "2.2.0",
       "notes": [

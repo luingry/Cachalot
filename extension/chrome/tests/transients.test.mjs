@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANALYSIS_RATE,
+  TRANSIENT_GRID,
   addDivider,
   analyze,
   applyFades,
@@ -475,4 +476,23 @@ test("without the transient detection every cut sits exactly on the grid (Auto c
   assert.ok(snapped.includes(0.975) && snapped.includes(2.012), String(snapped));
   assert.deepEqual(detectCuts(analysis, { grid: "auto", detect: false }), detectCuts(analysis, { grid: "1", detect: false }));
   for (const s of [0, 0.5, 1]) assert.deepEqual(detectCuts(analysis, { sensitivity: s, grid: "4", detect: false }), grid, "no sensitivity");
+});
+
+test("the transient recut puts one section between each pair of marks that pass the sensitivity", () => {
+  const onsets = [
+    { time: 0.31, strength: 0.9, band: 0 },
+    { time: 0.33, strength: 0.4, band: 2 }, // 20 ms after a stronger one: the same cut
+    { time: 1.07, strength: 0.8, band: 1 },
+    { time: 1.9, strength: 0.05, band: 3 }, // too weak for this sensitivity
+    { time: 2.45, strength: 0.7, band: 0 },
+  ];
+  const analysis = { onsets, duration: 4, beat: 0.5, bar: 2, origin: 0, bpm: 120, confidence: 1 };
+  assert.deepEqual(detectCuts(analysis, { sensitivity: 0.5, grid: TRANSIENT_GRID }), [0.31, 1.07, 2.45]);
+  // off the grid entirely: no bar line is a cut
+  assert.ok(!detectCuts(analysis, { sensitivity: 0.5, grid: TRANSIENT_GRID }).includes(2));
+  // without the detection it is the default division
+  assert.deepEqual(
+    detectCuts(analysis, { grid: TRANSIENT_GRID, detect: false }),
+    detectCuts(analysis, { grid: "1", detect: false }),
+  );
 });

@@ -15,8 +15,11 @@ import {
   ANALYSIS_RATE,
   DEFAULT_SENSITIVITY,
   GRIDS,
+  MAX_BPM,
+  MIN_BPM,
   MIN_DRAG_GAP_S,
   MULTI_BAR_GRIDS,
+  TRANSIENT_GRID,
   addDivider,
   analyze,
   applyFades,
@@ -44,6 +47,7 @@ import {
   sectionKey,
   thresholdFor,
   withOrigin,
+  withTempo,
 } from "../src/lib/transients.js";
 
 const SETTINGS_KEY = "transientSettings";
@@ -111,6 +115,8 @@ const ICONS = {
   undo: ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"],
   redo: ["m15 14 5-5-5-5", "M20 9H9.5a5.5 5.5 0 0 0 0 11H13"],
   reset: ["M3 12h18", "m7 8-4 4 4 4", "m17 8 4 4-4 4"],
+  recut: ["M21 12a9 9 0 0 1-15.5 6.2L3 16", "M3 21v-5h5", "M3 12a9 9 0 0 1 15.5-6.2L21 8", "M21 3v5h-5"],
+  move: ["M8.5 7h7v10h-7z", "m5 9.5-2.5 2.5L5 14.5", "m19 9.5 2.5 2.5-2.5 2.5"],
   merge: ["M3 12h6.5", "m6.5 8.5 3.5 3.5-3.5 3.5", "M21 12h-6.5", "m17.5 8.5-3.5 3.5 3.5 3.5"],
 };
 /** The row button that opens the view. */
@@ -180,7 +186,9 @@ export function createTransientView({ request, title, message, onClose }) {
     samples: null,
     peaks: null,
     gain: 1,
-    analysis: null,
+    analysis: null, // what the view uses: the detected analysis, at the user's tempo when one was typed
+    detected: null, // the analysis as found
+    bpm: null, // the tempo the user typed (null: the detected one), per song
     settings: { sensitivity: DEFAULT_SENSITIVITY, grid: "1", loop: false, detect: false }, // grid: per song, a new one
     // opens on 1:1; detect ("Auto-detect transient") always starts off: the cuts sit exactly on the tempo's grid
     edits: emptyEdits(),
@@ -260,6 +268,17 @@ export function createTransientView({ request, title, message, onClose }) {
     grid.append(b);
   }
   const info = el("span", "tr-info");
+  // a click on the tempo lets the user type the right one: the grid and the cuts are redone on it
+  const bpmBtn = el("button", "tr-bpm");
+  bpmBtn.type = "button";
+  bpmBtn.hidden = true;
+  const bpmInput = el("input", "tr-bpm-input");
+  bpmInput.type = "text";
+  bpmInput.inputMode = "decimal";
+  bpmInput.setAttribute("aria-label", "Andamento da música (BPM)");
+  bpmInput.hidden = true;
+  const infoText = el("span", "tr-info-text");
+  info.append(bpmBtn, bpmInput, infoText);
   const loop = el("label", "tr-loop");
   loop.title = "Loop: a seção clicada para ouvir toca de novo e de novo, até clicar outra vez";
   const loopInput = el("input");
@@ -272,8 +291,11 @@ export function createTransientView({ request, title, message, onClose }) {
   const detectInput = el("input");
   detectInput.type = "checkbox";
   detect.append(detectInput, el("span", "", "Auto-detect transient"));
+  // one section from each transient mark to the next (the marks under the waveform, at this sensitivity)
+  const recutBtn = iconButton(ICONS.recut, "Recalcular os trechos pelas marcações de transientes", "tr-recut");
+  recutBtn.disabled = true;
   const top = el("div", "tr-controls-top");
-  top.append(sens, loop, detect, info);
+  top.append(sens, loop, detect, recutBtn, info);
   controls.append(top, grid);
 
   const wave = el("div", "tr-wave");
@@ -295,6 +317,13 @@ export function createTransientView({ request, title, message, onClose }) {
   const toolSplit = textTool("÷2", "Dividir a seção em duas partes iguais", "tr-split");
   const toolDouble = textTool("×2", "Dobrar a seção (junta o que vier depois até o dobro do tamanho)", "tr-double");
   tools.append(toolDownload, toolSplit, toolDouble, toolReset, toolToggle);
+  // drags the hovered section along the song keeping its length; sits centered right above the hover tools
+  const moveBtn = iconButton(
+    ICONS.move,
+    "Arrastar a seção sem mudar o tamanho (encaixa na grade ou nos transientes · Alt solta)",
+    "tr-move",
+  );
+  moveBtn.hidden = true;
   tools.hidden = true;
   const tip = el("div", "tr-tip");
   tip.hidden = true;
@@ -311,7 +340,7 @@ export function createTransientView({ request, title, message, onClose }) {
   // merge: centered on the divider the pointer is near; joins the two sections it separates
   const mergeBtn = iconButton(ICONS.merge, "Juntar as duas seções", "tr-merge");
   mergeBtn.hidden = true;
-  wave.append(canvas, tools, mergeBtn, tip, overlay);
+  wave.append(canvas, tools, moveBtn, mergeBtn, tip, overlay);
 
   const foot = el("div", "tr-foot");
   const footText = el("span", "tr-foot-text", HINT);
@@ -394,12 +423,14 @@ export function createTransientView({ request, title, message, onClose }) {
     let peak = 0;
     for (const level of [v.peaks[1]]) for (let i = 0; i < level.max.length; i++) peak = Math.max(peak, level.max[i], -level.min[i]);
     v.gain = peak > 0.001 ? 0.95 / peak : 1;
-    v.analysis = analyze(v.samples, Number(state.rate) || ANALYSIS_RATE);
+    v.detected = analyze(v.samples, Number(state.rate) || ANALYSIS_RATE);
+    v.analysis = v.detected;
     v.start = 0;
     v.end = v.analysis.duration;
     node.dataset.view = `0,${v.end}`;
     await loadEdits();
     if (!v.alive) return;
+    v.analysis = withTempo(v.detected, v.bpm);
     overlay.hidden = true;
     controls.classList.remove("is-waiting");
     overview.hidden = false;
@@ -436,6 +467,7 @@ export function createTransientView({ request, title, message, onClose }) {
       if (saved?.edits) v.edits = { ...emptyEdits(), ...saved.edits };
       if (Array.isArray(saved?.disabled)) v.disabled = new Set(saved.disabled);
       if (saved?.fades && typeof saved.fades === "object") v.fades = saved.fades;
+      if (Number.isFinite(saved?.bpm)) v.bpm = saved.bpm;
       // Auto needs the detection, and it starts off
       if (GRIDS.includes(saved?.grid)) v.settings.grid = saved.grid === "auto" && !v.settings.detect ? "1" : saved.grid;
     } catch {
@@ -448,7 +480,7 @@ export function createTransientView({ request, title, message, onClose }) {
     clearTimeout(v.saveTimer);
     v.saveTimer = setTimeout(() => {
       chrome.storage.session
-        .set({ [EDITS_PREFIX + v.jobId]: { edits: v.edits, disabled: [...v.disabled], fades: v.fades, grid: v.settings.grid } })
+        .set({ [EDITS_PREFIX + v.jobId]: { edits: v.edits, disabled: [...v.disabled], fades: v.fades, grid: v.settings.grid, bpm: v.bpm } })
         .catch(() => {});
     }, 300);
   }
@@ -459,6 +491,11 @@ export function createTransientView({ request, title, message, onClose }) {
     // the sensitivity only steers the detection
     sensInput.disabled = !v.settings.detect;
     sens.classList.toggle("is-off", !v.settings.detect);
+    recutBtn.disabled = !v.settings.detect;
+    recutBtn.setAttribute("aria-pressed", String(v.settings.grid === TRANSIENT_GRID));
+    recutBtn.title = v.settings.detect
+      ? "Recalcular os trechos pelas marcações de transientes (desfaz as divisórias editadas · Ctrl+Z volta)"
+      : "Recalcular os trechos pelas marcações de transientes (ligue o Auto-detect transient)";
     const s = Math.round(v.settings.sensitivity * 100);
     sensInput.value = String(s);
     sensValue.textContent = String(s);
@@ -466,9 +503,14 @@ export function createTransientView({ request, title, message, onClose }) {
     for (const [g, b] of gridButtons) b.setAttribute("aria-pressed", String(g === v.settings.grid));
   }
 
-  function setGrid(g) {
+  /** Auto and the transient sections are the detection itself: choosing them turns it on. */
+  function applyGrid(g) {
     v.settings.grid = g;
-    if (g === "auto") v.settings.detect = true; // Auto is the detection itself
+    if (g === "auto" || g === TRANSIENT_GRID) v.settings.detect = true;
+  }
+
+  function setGrid(g) {
+    applyGrid(g);
     paintControls();
     saveEdits();
     if (v.analysis) recompute();
@@ -476,8 +518,8 @@ export function createTransientView({ request, title, message, onClose }) {
 
   detectInput.addEventListener("change", () => {
     v.settings.detect = detectInput.checked;
-    if (!v.settings.detect && v.settings.grid === "auto") {
-      v.settings.grid = "1"; // Auto without the detection is not a grid: back to bars
+    if (!v.settings.detect && v.settings.grid !== "1") {
+      v.settings.grid = "1"; // without the detection the sections go back to the default division (1:1)
       saveEdits();
     }
     paintControls();
@@ -532,19 +574,85 @@ export function createTransientView({ request, title, message, onClose }) {
   function updateInfo() {
     const active = activeSections().length;
     const total = v.sections.length;
-    const bpm = v.analysis ? `${Math.round(v.analysis.bpm)} BPM` : "";
-    info.textContent = [bpm, total ? `${active === total ? total : `${active}/${total}`} ${total === 1 ? "seção" : "seções"}` : ""]
-      .filter(Boolean)
-      .join(" · ");
-    info.title = v.analysis
-      ? `Andamento estimado ${v.analysis.bpm.toFixed(1)} BPM · ${v.analysis.onsets.length} transientes candidatos`
-      : "";
+    const count = total ? `${active === total ? total : `${active}/${total}`} ${total === 1 ? "seção" : "seções"}` : "";
+    bpmBtn.hidden = !v.analysis || !bpmInput.hidden;
+    if (v.analysis) {
+      bpmBtn.textContent = `${formatBpm(v.analysis.bpm, v.bpm != null)} BPM`;
+      bpmBtn.classList.toggle("is-manual", v.bpm != null);
+      bpmBtn.title =
+        v.bpm != null
+          ? `Andamento informado: ${formatBpm(v.bpm, true)} BPM (detectado ${v.detected.bpm.toFixed(1)}) · clique para mudar; vazio volta ao detectado`
+          : `Andamento estimado ${v.analysis.bpm.toFixed(1)} BPM · clique para informar o andamento certo`;
+    }
+    infoText.textContent = v.analysis && count ? ` · ${count}` : count;
+    info.title = v.analysis ? `${v.analysis.onsets.length} transientes candidatos` : "";
     node.dataset.sections = String(total);
     node.dataset.selected = String(v.selected.size);
     node.dataset.active = String(active);
+    node.dataset.disabled = JSON.stringify(v.sections.flatMap((x, i) => (v.disabled.has(x.key) ? [i] : [])));
     allBtn.disabled = v.busy || !active;
     allBtn.querySelector("span").textContent = active && active !== total ? `Baixar ${active}` : "Baixar todos";
   }
+
+  /** A tempo as shown: whole when detected, up to two decimals when typed. */
+  function formatBpm(bpm, exact) {
+    return exact ? String(Math.round(bpm * 100) / 100) : String(Math.round(bpm));
+  }
+
+  function editBpm() {
+    if (!v.analysis) return;
+    bpmInput.value = formatBpm(v.analysis.bpm, v.bpm != null);
+    bpmInput.hidden = false;
+    bpmBtn.hidden = true;
+    bpmInput.focus();
+    bpmInput.select();
+  }
+
+  /** commit: the typed tempo (empty: back to the detected one); otherwise the field just closes. */
+  function closeBpm(commit) {
+    if (bpmInput.hidden) return;
+    const text = bpmInput.value.trim().replace(",", ".");
+    bpmInput.hidden = true;
+    bpmInput.classList.remove("is-invalid");
+    if (commit) {
+      const value = Number(text);
+      if (!text) setBpm(null);
+      else if (Number.isFinite(value) && value >= MIN_BPM && value <= MAX_BPM) setBpm(Math.round(value * 100) / 100);
+    }
+    updateInfo();
+  }
+
+  /** The grid on the user's tempo (null: the detected one), and every cut counted on it again. */
+  function setBpm(bpm) {
+    const same = bpm == null ? v.bpm == null : v.bpm != null && Math.abs(bpm - v.bpm) < 1e-9;
+    if (same) return;
+    v.bpm = bpm;
+    v.analysis = withTempo(v.detected, bpm);
+    node.dataset.bpm = String(v.analysis.bpm);
+    saveEdits();
+    recompute();
+  }
+
+  bpmBtn.addEventListener("click", editBpm);
+  bpmInput.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // Space, Ctrl+Z and the like are typing here
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const text = bpmInput.value.trim().replace(",", ".");
+      const value = Number(text);
+      if (text && !(Number.isFinite(value) && value >= MIN_BPM && value <= MAX_BPM)) {
+        bpmInput.classList.add("is-invalid");
+        bpmInput.title = `Um andamento entre ${MIN_BPM} e ${MAX_BPM} BPM`;
+        return;
+      }
+      closeBpm(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeBpm(false);
+    }
+  });
+  bpmInput.addEventListener("input", () => bpmInput.classList.remove("is-invalid"));
+  bpmInput.addEventListener("blur", () => closeBpm(true));
 
   function setTitle(text) {
     v.title = text;
@@ -554,6 +662,7 @@ export function createTransientView({ request, title, message, onClose }) {
 
   /** Dividers and sections as drawn: a divider being dragged sits where the pointer is. */
   function layout() {
+    if (v.shift?.preview) return v.shift.preview;
     if (!v.drag?.moved) return { dividers: v.dividers, sections: v.sections };
     const dividers = v.dividers.map((d, i) => (i === v.drag.index ? { ...d, time: v.drag.time } : d));
     const sections = [];
@@ -1192,7 +1301,7 @@ export function createTransientView({ request, title, message, onClose }) {
   }
 
   function refreshHover() {
-    if (v.pointerX < 0 || v.drag || v.press || v.fadeDrag || v.originDrag || !v.analysis) return;
+    if (v.pointerX < 0 || v.drag || v.shift || v.press || v.fadeDrag || v.originDrag || !v.analysis) return;
     const origin = originHandleAt(v.pointerX, v.pointerY);
     const fade = origin ? null : fadeHandleAt(v.pointerX, v.pointerY);
     const divider = fade || origin ? -1 : dividerAt(v.pointerX);
@@ -1233,7 +1342,7 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function placeMerge(index) {
     const d = v.dividers[index];
-    if (!d || v.drag || v.press || v.fadeDrag || v.busy) {
+    if (!d || v.drag || v.shift || v.press || v.fadeDrag || v.busy) {
       mergeBtn.hidden = true;
       delete mergeBtn.dataset.index;
       return;
@@ -1295,8 +1404,8 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function placeTools() {
     const list = targets();
-    if (!list.length || v.drag || v.press || v.fadeDrag || v.busy) {
-      tools.hidden = true;
+    if (!list.length || v.drag || v.shift || v.press || v.fadeDrag || v.busy) {
+      hideTools();
       return;
     }
     const many = list.length > 1;
@@ -1325,8 +1434,190 @@ export function createTransientView({ request, title, message, onClose }) {
     const tw = tools.offsetWidth || 86;
     const x0 = Math.max(0, xOf(list[0].start));
     const x1 = Math.min(size.w, xOf(list[list.length - 1].end));
-    tools.style.left = `${clamp((x0 + x1) / 2 - tw / 2, 2, size.w - tw - 2)}px`;
-    tools.style.top = `${size.h - LANE_BOTTOM - 34}px`; // low: the fade handles live at the top
+    const left = clamp((x0 + x1) / 2 - tw / 2, 2, size.w - tw - 2);
+    const top = size.h - LANE_BOTTOM - 34; // low: the fade handles live at the top
+    tools.style.left = `${left}px`;
+    tools.style.top = `${top}px`;
+    // one section at a time, and only when there is somewhere to go
+    moveBtn.hidden = many || v.sections.length < 2;
+    if (!moveBtn.hidden) {
+      moveBtn.dataset.index = String(s.index);
+      const bw = moveBtn.offsetWidth || 22;
+      const bh = moveBtn.offsetHeight || 22;
+      moveBtn.style.left = `${left + tw / 2 - bw / 2}px`;
+      moveBtn.style.top = `${top - bh - 2}px`;
+    }
+  }
+
+  function hideTools() {
+    tools.hidden = true;
+    moveBtn.hidden = true;
+  }
+
+  // ---- Moving a section (keeps its length) ---------------------------------------
+  // The section slides along the song; whatever it lands on gives way (shrinks, or goes away when fully covered),
+  // and the space it leaves behind becomes a new section, disabled. Its start or end snaps to the grid lines and to
+  // the transient marks (Alt: free); an edge close to another divider or to the song's edges lands on it.
+
+  /** Grid lines (the chosen division; Auto and the transient sections use 1/16) and the transient marks shown, sorted. */
+  function shiftSnaps() {
+    const a = gridded();
+    const g = GRIDS.includes(v.settings.grid) && v.settings.grid !== "auto" ? v.settings.grid : "16";
+    const threshold = thresholdFor(v.settings.sensitivity);
+    const times = gridLines(a, g).map((l) => l.time);
+    if (v.settings.detect) for (const o of a.onsets) if (o.strength >= threshold) times.push(o.time); // the marks show with it
+    return times.sort((x, y) => x - y);
+  }
+
+  function nearestIn(sorted, t) {
+    let lo = 0;
+    let hi = sorted.length - 1;
+    if (hi < 0) return null;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] < t) lo = mid + 1;
+      else hi = mid;
+    }
+    const after = sorted[lo];
+    const before = lo > 0 ? sorted[lo - 1] : after;
+    return Math.abs(before - t) <= Math.abs(after - t) ? before : after;
+  }
+
+  /** Where the dragged section starts for pointer x: inside the song, snapped unless free. */
+  function shiftTime(x, free) {
+    const { len, grab, lo, hi } = v.shift;
+    let t = clamp(tOf(x) - grab, lo, hi);
+    if (!free) {
+      const tol = (SNAP_PX / size.w) * span();
+      let best = null;
+      let bestD = tol;
+      for (const off of [0, len]) {
+        const c = nearestIn(v.shift.snaps, t + off);
+        const d = c === null ? Infinity : Math.abs(c - (t + off));
+        if (d <= bestD && c - off >= lo - 1e-9 && c - off <= hi + 1e-9) {
+          best = c - off;
+          bestD = d;
+        }
+      }
+      if (best !== null) t = best;
+    }
+    // no sliver of a section: an edge this close to another divider (or the song's edges) lands on it
+    for (const d of v.shift.dividers) {
+      if (Math.abs(d.time - t) < MIN_GAP_S) t = d.time;
+      else if (Math.abs(d.time - (t + len)) < MIN_GAP_S) t = d.time - len;
+    }
+    return clamp(t, lo, hi);
+  }
+
+  /**
+   * The song after moving the section to start at `t`, from the state the drag started on: edits (the dividers it now
+   * covers removed, its two edges added), sections, and which of them are disabled and faded.
+   */
+  function shiftResult(state, t) {
+    const { section, len, dividers, sections, disabled, fades } = state;
+    const e = t + len;
+    const inside = (time) => time > t + 1e-6 && time < e - 1e-6;
+    let edits = state.edits;
+    for (const d of dividers) {
+      if (d.kind !== "start" && d.kind !== "end" && inside(d.time)) edits = removeDivider(edits, d);
+    }
+    // and any automatic cut a removed divider was hiding
+    for (const c of v.cuts) if (inside(c)) edits = removeDivider(edits, { kind: "auto", time: c });
+    const kept = (time) => dividers.some((d) => Math.abs(d.time - time) < 1e-6);
+    if (!kept(t)) edits = addDivider(edits, t);
+    if (!kept(e)) edits = addDivider(edits, e);
+    const built = buildSections({ duration: v.analysis.duration, cuts: v.cuts, edits });
+    const nextDisabled = new Set();
+    const nextFades = {};
+    for (const x of built.sections) {
+      const mid = (x.start + x.end) / 2;
+      let source = null;
+      let off = false;
+      if (Math.abs(x.start - t) < 1e-6) {
+        source = section; // the moved one keeps its state and fades
+        off = disabled.has(section.key);
+      } else if (mid > section.start && mid < section.end) {
+        off = true; // the space it left
+      } else {
+        source = sections.find((o) => mid >= o.start && mid < o.end) || null; // what is left of a section it covered
+        off = Boolean(source && disabled.has(source.key));
+      }
+      if (off) nextDisabled.add(x.key);
+      const f = source && fades[source.key];
+      if (f) nextFades[x.key] = Math.abs(x.end - x.start - (source.end - source.start)) < 1e-6 ? f : fitFade(f, x.end - x.start);
+    }
+    return { edits, built, disabled: nextDisabled, fades: nextFades, key: sectionKey(t) };
+  }
+
+  moveBtn.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !v.analysis || v.busy) return;
+    const section = v.sections[Number(moveBtn.dataset.index)];
+    if (!section) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(v.clickTimer);
+    const first = v.dividers[0].time;
+    const last = v.dividers[v.dividers.length - 1].time;
+    const len = section.end - section.start;
+    v.shift = {
+      section,
+      len,
+      grab: tOf(localX(e)) - section.start,
+      lo: first,
+      hi: Math.max(first, last - len),
+      time: section.start,
+      moved: false,
+      preview: null,
+      snaps: shiftSnaps(),
+      dividers: v.dividers,
+      sections: v.sections,
+      edits: v.edits,
+      disabled: v.disabled,
+      fades: v.fades,
+    };
+    canvas.setPointerCapture(e.pointerId); // the moves and the release go to the canvas
+    hideTools();
+    mergeBtn.hidden = true;
+    canvas.style.cursor = "grabbing";
+  });
+
+  function moveShift(x, free) {
+    const t = shiftTime(x, free);
+    if (Math.abs(t - v.shift.time) < 1e-9 && v.shift.moved) return;
+    if (!v.shift.moved && Math.abs(t - v.shift.section.start) < 1e-9) return;
+    v.shift.time = t;
+    v.shift.moved = true;
+    const r = shiftResult(v.shift, t);
+    v.shift.preview = r.built;
+    // drawn as it would be: the space left disabled, what it covers shrunk (put back if the drag is cancelled)
+    v.disabled = r.disabled;
+    v.fades = r.fades;
+    showTip(xOf(t), `${formatTime(t, 3)} – ${formatTime(t + v.shift.len, 3)}`);
+    draw();
+    followPlaying(r.built.sections);
+  }
+
+  function endShift(cancelled) {
+    const state = v.shift;
+    v.shift = null;
+    tip.hidden = true;
+    canvas.style.cursor = "";
+    v.disabled = state.disabled;
+    v.fades = state.fades;
+    if (!state.moved || cancelled || Math.abs(state.time - state.section.start) < 1e-6) {
+      draw();
+      return;
+    }
+    const r = shiftResult(state, state.time);
+    change(() => {
+      v.edits = r.edits;
+      v.disabled = r.disabled;
+      v.fades = r.fades;
+      const keys = new Set(r.built.sections.map((x) => x.key));
+      const wasSelected = v.selected.delete(state.section.key);
+      for (const k of [...v.selected]) if (!keys.has(k)) v.selected.delete(k);
+      if (wasSelected) v.selected.add(r.key);
+    });
   }
 
   /** Sections intersecting [a, b] (seconds), by key. */
@@ -1363,7 +1654,7 @@ export function createTransientView({ request, title, message, onClose }) {
     const x = localX(e);
     const y = localY(e);
     canvas.setPointerCapture(e.pointerId);
-    tools.hidden = true;
+    hideTools();
     mergeBtn.hidden = true;
     if (e.button === 1 || e.button === 2) {
       v.press = { mode: "pan", x, start: v.start, end: v.end, moved: false };
@@ -1395,6 +1686,10 @@ export function createTransientView({ request, title, message, onClose }) {
     v.pointerX = localX(e);
     v.pointerY = localY(e);
     if (!v.analysis) return;
+    if (v.shift) {
+      moveShift(v.pointerX, e.altKey);
+      return;
+    }
     if (v.originDrag) {
       // snaps to the nearest transient (Alt: free); the grid and its cuts follow live
       let t = clamp(tOf(v.pointerX - v.originDrag.grab), 0, v.analysis.duration - MIN_SPAN_S);
@@ -1446,6 +1741,11 @@ export function createTransientView({ request, title, message, onClose }) {
   });
 
   function endPointer(e, cancelled = false) {
+    if (v.shift) {
+      endShift(cancelled);
+      refreshHover();
+      return;
+    }
     if (v.originDrag) {
       const { time, moved } = v.originDrag;
       v.originDrag = null;
@@ -1512,24 +1812,27 @@ export function createTransientView({ request, title, message, onClose }) {
   canvas.addEventListener("pointerup", (e) => endPointer(e));
   canvas.addEventListener("pointercancel", (e) => endPointer(e, true));
   canvas.addEventListener("pointerleave", (e) => {
-    if (v.drag || v.press || v.originDrag) return;
-    if (tools.contains(e.relatedTarget) || mergeBtn.contains(e.relatedTarget)) return;
+    if (v.drag || v.shift || v.press || v.originDrag) return;
+    if (tools.contains(e.relatedTarget) || mergeBtn.contains(e.relatedTarget) || moveBtn.contains(e.relatedTarget)) return;
     v.pointerX = -1;
-    tools.hidden = true;
+    hideTools();
     mergeBtn.hidden = true;
     if (v.hover.section !== -1 || v.hover.divider !== -1 || v.hover.origin) {
       v.hover = { section: -1, divider: -1 };
       draw();
     }
   });
-  tools.addEventListener("pointerleave", (e) => {
-    if (e.relatedTarget === canvas || mergeBtn.contains(e.relatedTarget)) return;
+  const leaveTools = (e) => {
+    if (v.shift || e.relatedTarget === canvas || mergeBtn.contains(e.relatedTarget)) return;
+    if (tools.contains(e.relatedTarget) || moveBtn.contains(e.relatedTarget)) return;
     mergeBtn.hidden = true;
     v.pointerX = -1;
-    tools.hidden = true;
+    hideTools();
     v.hover = { section: -1, divider: -1 };
     draw();
-  });
+  };
+  tools.addEventListener("pointerleave", leaveTools);
+  moveBtn.addEventListener("pointerleave", leaveTools);
 
   canvas.addEventListener("dblclick", (e) => {
     if (!v.analysis) return;
@@ -1681,10 +1984,16 @@ export function createTransientView({ request, title, message, onClose }) {
   // Ctrl+Z and redone with Ctrl+Shift+Z or Ctrl+Y. Sensitivity and grid are settings, not edits.
 
   const MAX_UNDO = 200;
-  const snapshot = () => ({ edits: structuredClone(v.edits), disabled: [...v.disabled], fades: structuredClone(v.fades) });
+  // withGrid: the change also chose the grid (the transient recut), so undoing it puts the grid back too
+  const snapshot = (withGrid = false) => ({
+    edits: structuredClone(v.edits),
+    disabled: [...v.disabled],
+    fades: structuredClone(v.fades),
+    ...(withGrid ? { grid: v.settings.grid } : {}),
+  });
 
-  function change(apply) {
-    v.undo.push(snapshot());
+  function change(apply, { withGrid = false } = {}) {
+    v.undo.push(snapshot(withGrid));
     if (v.undo.length > MAX_UNDO) v.undo.shift();
     v.redo = [];
     apply();
@@ -1700,13 +2009,30 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function travel(from, to) {
     if (!v.analysis || !from.length || v.drag) return;
-    to.push(snapshot());
     const state = from.pop();
+    to.push(snapshot(state.grid !== undefined));
     v.edits = state.edits;
     v.disabled = new Set(state.disabled);
     v.fades = state.fades || {};
+    if (state.grid !== undefined) {
+      applyGrid(state.grid);
+      paintControls();
+    }
     afterChange();
   }
+
+  // the recut: the sections from the transient marks, the dividers the user placed or moved gone (trims and bar 1 stay)
+  recutBtn.addEventListener("click", () => {
+    if (!v.analysis || !v.settings.detect || v.drag) return;
+    change(
+      () => {
+        v.edits = { ...emptyEdits(), start: v.edits.start, end: v.edits.end, origin: v.edits.origin };
+        applyGrid(TRANSIENT_GRID);
+        paintControls();
+      },
+      { withGrid: true },
+    );
+  });
 
   const undo = () => travel(v.undo, v.redo);
   const redo = () => travel(v.redo, v.undo);
@@ -1927,7 +2253,7 @@ export function createTransientView({ request, title, message, onClose }) {
    */
   async function chooseFormat(button) {
     const anchor = button.getBoundingClientRect();
-    tools.hidden = true;
+    hideTools();
     mergeBtn.hidden = true;
     const res = await message("transient", { op: "format", body: {} });
     if (!v.alive) return null;
@@ -2014,7 +2340,7 @@ export function createTransientView({ request, title, message, onClose }) {
       v.busy = false;
       return;
     }
-    tools.hidden = true;
+    hideTools();
     updateInfo();
     button.classList.add("is-busy");
     footFolder.hidden = true;

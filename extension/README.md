@@ -66,7 +66,15 @@ mais nova).
       clap, shaker ou chimbal tocados à frente de propósito não puxam o corte), as marcas dos transientes aparecem
       sob a waveform, a **Sensibilidade** vale (à esquerda só os transientes fortes, à direita também os fracos) e
       **Auto** fica disponível: corta em todo começo de compasso e, dentro dele, em cada 1/16 onde um transiente é
-      tocado (sem pulso estável, em cada transiente). Escolher Auto marca a caixa; desmarcá-la no Auto volta ao 1:1.
+      tocado (sem pulso estável, em cada transiente). Escolher Auto marca a caixa; desmarcá-la volta sempre à divisão
+      padrão (1:1).
+    - **Recalcular** (ícone ↻ ao lado do Auto-detect transient, só com ele marcado): refaz as seções a partir das
+      marcas dos transientes, uma seção de cada marca até a seguinte, na sensibilidade escolhida; as divisórias
+      editadas saem (os cortes do começo/fim e o compasso 1 ficam). Fica aceso enquanto vale; escolher uma divisão
+      volta à grade, e Ctrl+Z desfaz tudo, inclusive a divisão.
+    - **BPM manual**: clique no BPM (à direita, na linha de cima) e digite o andamento certo (vírgula ou ponto,
+      20 a 400); Enter aplica, Esc cancela e vazio volta ao detectado. A grade passa a ser exata nesse BPM a partir
+      do compasso 1 e as divisões e os cortes nos transientes são recalculados. Fica em laranja e vale por música.
     - **Loop**: a seção clicada para ouvir toca em volta até clicar de novo; redimensionada, juntada ou com fade mudado
       enquanto toca, o loop passa na hora a usar o novo início e fim.
     - Cada seção ouvida ou salva tem rampas de 2 ms no começo e 3 ms no fim contra estalo (o corte quase nunca cai onde
@@ -89,6 +97,10 @@ mais nova).
       vier depois até o dobro do tamanho), **voltar ao tamanho original** (desfaz o que mudou nas divisórias dela) e
       **desativar**. Sobre uma seleção, todos valem para todas as seções selecionadas; baixar uma seleção
       salva um arquivo por seção, na pasta de downloads.
+    - **Arrastar a seção** (botão logo acima desses, centralizado): move a seção pela música sem mudar o tamanho.
+      O espaço que ela deixa vira uma seção nova, desativada; a seção onde ela entra (ativa ou não) cede o tamanho,
+      e some se ficar toda por baixo. O começo ou o fim grudam na grade da divisão escolhida e, com o Auto-detect
+      transient marcado, nas marcas dos transientes (Alt solta); perto de outra divisória, encaixa nela.
     - **Fade-in e fade-out** por seção: com o ponteiro na seção aparecem, nas bordas de cima, um quadrado em cada
       ponta — arraste para dentro para o comprimento do fade — e, quando há fade, um ponto sobre a curva: para cima
       fica mais agressiva (alto até perto da borda, corte rápido), para baixo mais suave (cauda longa). Duplo clique
