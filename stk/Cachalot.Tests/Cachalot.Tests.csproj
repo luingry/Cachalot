@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Self-contained test runner (no test framework package): unit tests for the module's pure logic, plus an
+    integration run against the real Python backend when started with the integration switch (see Program.cs).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Cachalot.Tests</AssemblyName>
+    <RootNamespace>Cachalot.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="SwissTechKnife.Sdk" HintPath="..\lib\SwissTechKnife.Sdk.dll" Private="true" />
+    <Reference Include="System.Net.Http" />
+    <ProjectReference Include="..\Cachalot.Module\Cachalot.Module.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,397 @@
+<UserControl x:Class="Cachalot.Module.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:SwissTechKnife.Sdk;assembly=SwissTechKnife.Sdk">
+    <!-- Host "Configurações" tab (inside the details dialog card: no nested cards). Changes apply immediately. -->
+    <UserControl.Resources>
+        <Style x:Key="Section" TargetType="TextBlock" BasedOn="{StaticResource Text.Overline}">
+            <Setter Property="Margin" Value="0,30,0,0" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+        <Style x:Key="Toggle" TargetType="CheckBox" BasedOn="{StaticResource Switch}">
+            <Setter Property="Margin" Value="0,14,0,0" />
+        </Style>
+        <Style x:Key="FieldRow" TargetType="Grid">
+            <Setter Property="Margin" Value="0,14,0,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- Browser extension -->
+        <TextBlock Text="Extensão do navegador" Style="{StaticResource Text.Overline}" />
+        <CheckBox x:Name="BridgeSwitch" Style="{StaticResource Toggle}" Checked="OnBridgeSwitch" Unchecked="OnBridgeSwitch">
+            <StackPanel>
+                <TextBlock Text="Receber links da extensão do Chrome" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock x:Name="BridgeStatus" Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <StackPanel x:Name="BridgePanel">
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Código de pareamento" Style="{StaticResource Text.BodyStrong}" />
+                    <TextBlock Text="Cole na extensão uma vez. Só quem tem o código consegue mandar links ou cookies." Style="{StaticResource Hint}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="{StaticResource Brush.Surface3}" CornerRadius="{StaticResource Radius.Sm}" Padding="12,6">
+                        <TextBlock x:Name="BridgeCode" FontFamily="Cascadia Mono, Consolas" FontSize="15" Foreground="{StaticResource Brush.Text.Primary}" />
+                    </Border>
+                    <Button Style="{StaticResource Button.Icon}" ui:Ui.Icon="&#xE8C8;" ToolTip="Copiar o código" Margin="8,0,0,0" Click="OnCopyCode" />
+                    <Button Style="{StaticResource Button.Icon}" ui:Ui.Icon="&#xE72C;" ToolTip="Gerar outro código (a extensão precisa ser pareada de novo)" Margin="4,0,0,0" Click="OnNewCode" />
+                </StackPanel>
+            </Grid>
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="ExtensionHint" Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0"
+                           Text="Instalação: o Cachalot abre a pasta da extensão e a página de extensões do Chrome. Ligue o Modo do desenvolvedor, clique em Carregar sem compactação e escolha a pasta." />
+                <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE71B;" Content="Instalar no Chrome…" Click="OnInstallExtension" VerticalAlignment="Center" />
+            </Grid>
+        </StackPanel>
+
+        <!-- Output -->
+        <TextBlock Text="Arquivos" Style="{StaticResource Section}" />
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Nome dos arquivos" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Downloads de áudio sempre usam “Artista - Música”." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <ComboBox x:Name="TemplateBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnTemplateChanged" AutomationProperties.Name="Nome dos arquivos" />
+        </Grid>
+        <CheckBox x:Name="OrganizeSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Separar por plataforma" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Cada site numa subpasta: YouTube, Instagram, Torrents…" Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="SkipSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Não baixar de novo o que já existe" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Com o mesmo nome na pasta, o arquivo é mantido em vez de substituído." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="PlaylistSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Vídeo com playlist: baixar a lista inteira" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Links de playlist, canal ou perfil sempre baixam a lista." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Itens por playlist" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Os primeiros da lista; cada um vira um download." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <ComboBox x:Name="PlaylistLimitBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnPlaylistLimitChanged" AutomationProperties.Name="Itens por playlist" />
+        </Grid>
+        <CheckBox x:Name="PlaylistFolderSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <TextBlock Text="Cada playlist na sua própria pasta" Style="{StaticResource Text.BodyStrong}" />
+        </CheckBox>
+
+        <!-- Extras -->
+        <TextBlock Text="Extras do vídeo e do áudio" Style="{StaticResource Section}" />
+        <CheckBox x:Name="MetadataSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Gravar título, artista e data no arquivo" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Players e bibliotecas de música mostram as informações certas." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="ThumbSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <TextBlock Text="Embutir a capa (miniatura) no arquivo" Style="{StaticResource Text.BodyStrong}" />
+        </CheckBox>
+        <CheckBox x:Name="NfoSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Criar arquivo .nfo" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Para Kodi, Jellyfin e Plex reconhecerem o vídeo." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="ChaptersSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Dividir por capítulos" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Um arquivo por capítulo, quando o vídeo tem capítulos (ótimo para álbuns completos)." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="LiveSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Lives desde o começo" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Sem isso, uma live é gravada a partir do momento em que você adiciona." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+
+        <TextBlock Text="Legendas" Style="{StaticResource Text.BodyStrong}" Margin="0,18,0,0" />
+        <Border Style="{StaticResource Segmented.Container}" HorizontalAlignment="Left" Margin="0,8,0,0">
+            <ui:SegmentedPanel>
+                <RadioButton x:Name="SubsOff" Style="{StaticResource Segmented.Item}" GroupName="CachalotSubs" Content="Não baixar" Checked="OnSubtitlesChanged" />
+                <RadioButton x:Name="SubsFile" Style="{StaticResource Segmented.Item}" GroupName="CachalotSubs" Content="Arquivo .srt" Checked="OnSubtitlesChanged" />
+                <RadioButton x:Name="SubsEmbed" Style="{StaticResource Segmented.Item}" GroupName="CachalotSubs" Content="Embutidas" Checked="OnSubtitlesChanged" />
+            </ui:SegmentedPanel>
+        </Border>
+        <StackPanel x:Name="SubtitlePanel">
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="200" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Idiomas" Style="{StaticResource Text.BodyStrong}" />
+                    <TextBlock Text="Códigos separados por vírgula: pt, en, es…" Style="{StaticResource Hint}" />
+                </StackPanel>
+                <TextBox x:Name="SubtitleLanguages" Grid.Column="1" VerticalAlignment="Center" LostKeyboardFocus="OnTextCommitted" />
+            </Grid>
+            <CheckBox x:Name="AutoSubsSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+                <StackPanel>
+                    <TextBlock Text="Incluir legendas automáticas" Style="{StaticResource Text.BodyStrong}" />
+                    <TextBlock Text="As geradas pelo próprio site quando não existe uma feita por pessoas." Style="{StaticResource Hint}" />
+                </StackPanel>
+            </CheckBox>
+        </StackPanel>
+
+        <TextBlock Text="Patrocínios no YouTube (SponsorBlock)" Style="{StaticResource Text.BodyStrong}" Margin="0,18,0,0" />
+        <TextBlock Text="Usa a base colaborativa do SponsorBlock: propaganda, autopromoção e pedidos de inscrição." Style="{StaticResource Hint}" />
+        <Border Style="{StaticResource Segmented.Container}" HorizontalAlignment="Left" Margin="0,8,0,0">
+            <ui:SegmentedPanel>
+                <RadioButton x:Name="SponsorOff" Style="{StaticResource Segmented.Item}" GroupName="CachalotSponsor" Content="Manter" Checked="OnSponsorChanged" />
+                <RadioButton x:Name="SponsorRemove" Style="{StaticResource Segmented.Item}" GroupName="CachalotSponsor" Content="Cortar" Checked="OnSponsorChanged" />
+                <RadioButton x:Name="SponsorMark" Style="{StaticResource Segmented.Item}" GroupName="CachalotSponsor" Content="Marcar como capítulo" Checked="OnSponsorChanged" />
+            </ui:SegmentedPanel>
+        </Border>
+
+        <!-- Network -->
+        <TextBlock Text="Fila e rede" Style="{StaticResource Section}" />
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="160" />
+                <ColumnDefinition Width="36" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Downloads ao mesmo tempo" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Cada site ainda tem seu próprio limite, para não ser bloqueado." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <Slider x:Name="ConcurrentSlider" Grid.Column="1" Minimum="1" Maximum="8" IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center" ValueChanged="OnConcurrentChanged" />
+            <TextBlock x:Name="ConcurrentValue" Grid.Column="2" Style="{StaticResource Text.BodyStrong}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="160" />
+                <ColumnDefinition Width="36" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Conexões por download" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Pedaços baixados em paralelo; mais é mais rápido, mas alguns sites limitam." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <Slider x:Name="FragmentsSlider" Grid.Column="1" Minimum="1" Maximum="16" IsSnapToTickEnabled="True" TickFrequency="1" VerticalAlignment="Center" ValueChanged="OnFragmentsChanged" />
+            <TextBlock x:Name="FragmentsValue" Grid.Column="2" Style="{StaticResource Text.BodyStrong}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Novas tentativas" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Só para falhas passageiras (rede, limite do site), com espera crescente." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <ComboBox x:Name="RetriesBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnRetriesChanged" AutomationProperties.Name="Novas tentativas" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Limite de velocidade" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Por download. Ex.: 500K, 2M. Vazio = sem limite." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <TextBox x:Name="SpeedLimit" Grid.Column="1" VerticalAlignment="Center" ui:Ui.Placeholder="Sem limite" LostKeyboardFocus="OnTextCommitted" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Proxy" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="http://, https:// ou socks5://usuário:senha@host:porta" Style="{StaticResource Hint}" />
+            </StackPanel>
+            <TextBox x:Name="Proxy" Grid.Column="1" VerticalAlignment="Center" ui:Ui.Placeholder="Sem proxy" LostKeyboardFocus="OnTextCommitted" />
+        </Grid>
+        <CheckBox x:Name="SleepSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Não deixar o PC dormir durante downloads" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="A tela ainda pode desligar; só a suspensão espera a fila terminar." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+
+        <!-- Cookies -->
+        <TextBlock Text="Login e cookies" Style="{StaticResource Section}" />
+        <TextBlock Text="Para conteúdo que só aparece logado (privados, membros, idade) e para o YouTube parar de pedir verificação. Os cookies ficam neste PC e cada site só recebe os seus."
+                   Style="{StaticResource Hint}" Margin="0,8,0,0" />
+        <StackPanel x:Name="CookieList" Margin="0,6,0,0" />
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="CookieEmpty" Text="Nenhum site com cookies. A extensão envia sozinha; ou importe um cookies.txt (formato Netscape)."
+                       Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0" />
+            <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE8B5;" Content="Importar cookies.txt…" Click="OnImportCookies" VerticalAlignment="Center" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Ler cookies do navegador" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Para sites sem cookies importados. Chrome e Edge recentes costumam bloquear; Firefox funciona." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <ComboBox x:Name="BrowserBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnBrowserChanged" AutomationProperties.Name="Navegador" />
+        </Grid>
+
+        <!-- Rules -->
+        <TextBlock Text="Regras" Style="{StaticResource Section}" />
+        <TextBlock Text="Quando o link combinar, salve em outra pasta ou com outro formato. A primeira regra que combinar vale." Style="{StaticResource Hint}" Margin="0,8,0,0" />
+        <StackPanel x:Name="RuleList" />
+        <Button Style="{StaticResource Button.Ghost}" ui:Ui.Icon="&#xE710;" Content="Adicionar regra" HorizontalAlignment="Left" Margin="0,10,0,0" Click="OnAddRule" />
+
+        <!-- Channels -->
+        <TextBlock Text="Canais seguidos" Style="{StaticResource Section}" />
+        <TextBlock Text="Canais, perfis ou playlists conferidos de tempos em tempos. Na primeira vez só aprende o que já existe; depois avisa (ou baixa) o que for novo."
+                   Style="{StaticResource Hint}" Margin="0,8,0,0" />
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="ChannelUrl" ui:Ui.Placeholder="Link do canal, perfil ou playlist" KeyDown="OnChannelKeyDown" />
+            <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE710;" Content="Seguir" Margin="8,0,0,0" Click="OnFollow" />
+        </Grid>
+        <StackPanel x:Name="ChannelList" />
+
+        <!-- Engines -->
+        <TextBlock Text="Motores" Style="{StaticResource Section}" />
+        <CheckBox x:Name="NativeSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Extratores próprios para redes sociais" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="X, Reddit, Instagram, TikTok, Pinterest, Bluesky, Threads, clipes da Twitch e Douyin, inclusive fotos e carrosséis." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="GallerySwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Galerias e perfis inteiros (gallery-dl)" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="DeviantArt, Pixiv, ArtStation, Imgur, Tumblr, perfis do X e subreddits. Instalado no primeiro uso." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="HeadlessSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Resgatar vídeos de players escondidos" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Quando nada mais acha o vídeo, abre a página num navegador invisível e captura o stream." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="120" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Torrents: porta" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Magnets e .torrent baixam sem semear depois. O suporte é instalado no primeiro torrent." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <TextBox x:Name="TorrentPort" Grid.Column="1" VerticalAlignment="Center" LostKeyboardFocus="OnTextCommitted" />
+        </Grid>
+        <CheckBox x:Name="UpnpSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <TextBlock Text="Abrir a porta no roteador (UPnP)" Style="{StaticResource Text.BodyStrong}" />
+        </CheckBox>
+        <CheckBox x:Name="TrackersSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Adicionar trackers públicos" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Ajuda magnets com poucos pares a começar." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+
+        <!-- Shortcuts -->
+        <TextBlock Text="Atalhos" Style="{StaticResource Section}" />
+        <CheckBox x:Name="ClipboardSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Oferecer o link copiado" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Ao voltar para o Cachalot com um link copiado, ele aparece pronto para adicionar." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+        <CheckBox x:Name="HotkeySwitch" Style="{StaticResource Toggle}" Checked="OnHotkeySwitch" Unchecked="OnHotkeySwitch">
+            <StackPanel>
+                <TextBlock Text="Ctrl + Alt + D baixa o link copiado" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock x:Name="HotkeyHint" Text="Funciona em qualquer app, com a qualidade escolhida na página." Style="{StaticResource Hint}" />
+            </StackPanel>
+        </CheckBox>
+
+        <!-- Advanced -->
+        <TextBlock Text="Avançado" Style="{StaticResource Section}" />
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="FFmpeg" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock x:Name="FfmpegText" Style="{StaticResource Hint}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="FfmpegAuto" Style="{StaticResource Button.Ghost}" Content="Automático" Click="OnFfmpegAuto" Margin="0,0,8,0" />
+                <Button Style="{StaticResource Button.Secondary}" Content="Localizar…" Click="OnFfmpegBrowse" />
+            </StackPanel>
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Motor de download" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock x:Name="EngineText" Style="{StaticResource Hint}" />
+            </StackPanel>
+            <Button Grid.Column="1" Style="{StaticResource Button.Ghost}" ui:Ui.Icon="&#xE72C;" Content="Verificar" Click="OnCheckEngines" VerticalAlignment="Center" />
+        </Grid>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="240" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="Opções extras do yt-dlp" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Como no terminal, ex.: --embed-chapters. Opções que executam programas são ignoradas." Style="{StaticResource Hint}" />
+            </StackPanel>
+            <TextBox x:Name="ExtraFlags" Grid.Column="1" VerticalAlignment="Center" FontFamily="Cascadia Mono, Consolas" LostKeyboardFocus="OnTextCommitted" />
+        </Grid>
+        <CheckBox x:Name="TlsSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Ignorar certificados HTTPS" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Só para redes corporativas que interceptam HTTPS. Deixa as conexões vulneráveis." Style="{StaticResource Hint}" Foreground="{StaticResource Brush.Warning}" />
+            </StackPanel>
+        </CheckBox>
+        <Grid Style="{StaticResource FieldRow}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="VersionText" Style="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Style="{StaticResource Button.Ghost}" Content="Ver log do motor" Click="OnOpenLog" VerticalAlignment="Center" />
+        </Grid>
+    </StackPanel>
+</UserControl>

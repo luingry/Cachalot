@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    SwissTechKnife module: Cachalot's native page and settings. The Python backend (servidor.py and its engines
+    from the repository root) ships inside the package under backend/ and runs as a hidden child process; the
+    Chrome extension ships under extension/chrome/ and is copied to the data folder when the user installs it.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Cachalot.Module</AssemblyName>
+    <RootNamespace>Cachalot.Module</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile-only: the host provides the one shared copy at runtime (scripts/update-sdk.ps1 refreshes it). -->
+    <Reference Include="SwissTechKnife.Sdk" HintPath="..\lib\SwissTechKnife.Sdk.dll" Private="false" />
+    <Reference Include="System.Web" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cachalot.DevHost" />
+    <InternalsVisibleTo Include="Cachalot.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="module.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\servidor.py" Link="backend\servidor.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\sniffer.py" Link="backend\sniffer.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\fontes.py" Link="backend\fontes.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\nativos.py" Link="backend\nativos.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\diagnostico.py" Link="backend\diagnostico.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\direto.py" Link="backend\direto.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\galerias.py" Link="backend\galerias.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\torrents.py" Link="backend\torrents.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\dependencias.py" Link="backend\dependencias.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\opcoes_ytdlp.py" Link="backend\opcoes_ytdlp.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\extension\chrome\**\*" Exclude="..\..\extension\chrome\tests\**;..\..\extension\chrome\scripts\**;..\..\extension\chrome\node_modules\**;..\..\extension\chrome\docs\**;..\..\extension\chrome\package*.json"
+          Link="extension\chrome\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

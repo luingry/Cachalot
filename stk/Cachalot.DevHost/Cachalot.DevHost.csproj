@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Runs the Cachalot module without the SwissTechKnife host: the host's design system is loaded the same way the
+    host does it and a minimal IModuleContext stands in for the host. Not packaged. See Program.cs for the
+    command-line switches (data folder, snapshot output).
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Cachalot.DevHost</AssemblyName>
+    <RootNamespace>Cachalot.DevHost</RootNamespace>
+    <StartupObject>Cachalot.DevHost.Program</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Here the SDK is copied next to the exe: this process is the host. -->
+    <Reference Include="SwissTechKnife.Sdk" HintPath="..\lib\SwissTechKnife.Sdk.dll" Private="true" />
+    <ProjectReference Include="..\Cachalot.Module\Cachalot.Module.csproj" />
+  </ItemGroup>
+</Project>

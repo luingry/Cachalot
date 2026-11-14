@@ -47,6 +47,29 @@
         <member name="M:SwissTechKnife.Sdk.IModuleSettings.CreateSettingsView">
             <summary>Called the first time the tab opens; the host keeps the element until the module is disposed.</summary>
         </member>
+        <member name="T:SwissTechKnife.Sdk.IModuleTrayMenu">
+            <summary>
+            Optional: commands for the module's own notification-area icon, which the user turns on in the module's
+            settings ("Show icon in the notification area"). The host owns the icon: its menu starts with "Open",
+            followed by these items. Do not add an Exit/Close item: the module's enable switch controls its lifetime.
+            </summary>
+        </member>
+        <member name="M:SwissTechKnife.Sdk.IModuleTrayMenu.CreateTrayMenuItems">
+            <summary>
+            Called on the UI thread every time the menu opens, so items can reflect the current state.
+            Return new <c>MenuItem</c>/<c>Separator</c> instances each time (an element can have only one parent).
+            </summary>
+        </member>
+        <member name="T:SwissTechKnife.Sdk.IModuleWindow">
+            <summary>
+            Optional: the module has a dedicated window of its own, besides its page in the host. Requires
+            <c>"window": true</c> in <c>module.json</c> (so the host knows without loading the module). Double-clicking
+            the module's notification-area icon then calls <see cref="M:SwissTechKnife.Sdk.IModuleWindow.ShowWindow"/> instead of opening the host.
+            </summary>
+        </member>
+        <member name="M:SwissTechKnife.Sdk.IModuleWindow.ShowWindow">
+            <summary>Called on the UI thread. Create the window if needed, show it and bring it to the front.</summary>
+        </member>
         <member name="T:SwissTechKnife.Sdk.IModuleViewLifecycle">
             <summary>Optional: notified when the module's page is shown or hidden (pause timers while hidden).</summary>
         </member>

@@ -1,0 +1,388 @@
+/* Shared tokens and controls for the popup and the options page.
+   Dark surfaces separated by tone (no solid borders), 120-200 ms motion on
+   opacity / transform / background only. */
+
+:root {
+  color-scheme: dark;
+  --bg: #141413;
+  --surface: #1b1a18;
+  --surface-2: #22211e;
+  --surface-3: #2a2926;
+  --input: #2a2926;
+  --input-hover: #312f2b;
+  --text: #f2f0eb;
+  --text-2: #b9b5ac;
+  --text-3: #8a867d;
+  --accent: #e8743c;
+  --accent-hover: #f08550;
+  --accent-soft: rgba(232, 116, 60, 0.14);
+  --accent-text: #f4a57c;
+  --success: #63c28f;
+  --success-soft: rgba(99, 194, 143, 0.14);
+  --danger: #e5675b;
+  --danger-soft: rgba(229, 103, 91, 0.14);
+  --radius-control: 10px;
+  --radius-card: 14px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --mid: 160ms;
+  --slow: 200ms;
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 13px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.overline {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.meta {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.secondary {
+  color: var(--text-2);
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- Buttons ---------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background-color var(--mid) var(--ease), transform var(--fast) var(--ease), opacity var(--mid) var(--ease);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #1a0f08;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--input-hover);
+}
+
+.btn-ghost {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(232, 116, 60, 0.24);
+}
+
+.btn-sm {
+  height: 28px;
+  padding: 0 11px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.btn.is-done,
+.btn.is-done:disabled {
+  background: var(--success-soft);
+  color: var(--success);
+  opacity: 1;
+}
+
+.btn.is-busy {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.link-btn {
+  border: 0;
+  background: transparent;
+  padding: 3px 6px;
+  margin: -3px -6px;
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--mid) var(--ease), opacity var(--mid) var(--ease);
+}
+
+.link-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color var(--mid) var(--ease), transform var(--fast) var(--ease);
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.icon-btn-sm {
+  width: 28px;
+  height: 28px;
+}
+
+.icon-btn-sm svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- Inputs ----------------------------------------------------------- */
+
+.input {
+  height: 34px;
+  min-width: 0;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--input);
+  color: var(--text);
+  transition: background-color var(--mid) var(--ease);
+}
+
+.input:hover,
+.input:focus {
+  background: var(--input-hover);
+}
+
+.input:focus-visible {
+  outline: 2px solid rgba(232, 116, 60, 0.6);
+  outline-offset: 0;
+}
+
+.input::placeholder {
+  color: var(--text-3);
+}
+
+.input-code {
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.input-code::placeholder {
+  letter-spacing: 0.12em;
+}
+
+/* ---- Switch ----------------------------------------------------------- */
+
+.switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  transition: background-color var(--slow) var(--ease);
+  pointer-events: none;
+}
+
+.switch .knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform var(--slow) var(--ease), background-color var(--slow) var(--ease);
+}
+
+.switch input:checked + .track {
+  background: var(--accent);
+}
+
+.switch input:checked + .track .knob {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.switch input:focus-visible + .track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch input:disabled + .track {
+  opacity: 0.4;
+}
+
+/* ---- Messages --------------------------------------------------------- */
+
+.msg {
+  margin: 0;
+  font-size: 12px;
+  animation: fade-in var(--slow) var(--ease);
+}
+
+.msg-ok {
+  color: var(--success);
+}
+
+.msg-error {
+  color: var(--danger);
+}
+
+.msg-info {
+  color: var(--text-2);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: background-color var(--slow) var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
