@@ -9,6 +9,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Cachalot.Module;
 using Cachalot.Module.Downloads;
+using Cachalot.Module.Setup;
+using Cachalot.Module.Views;
 
 namespace Cachalot.DevHost
 {
@@ -69,6 +71,27 @@ namespace Cachalot.DevHost
             for (int i = 0; i * part < card.ActualHeight; i++)
             {
                 Render(card, Path.Combine(output, $"settings-{i + 1}.png"), new Rect(0, i * part, card.ActualWidth, Math.Min(part, card.ActualHeight - i * part)));
+            }
+
+            // Chrome extension setup popup: offer (developer mode off), waiting (developer mode on), done.
+            var states = new[]
+            {
+                ("extension-offer.png", new ChromeState { Found = true, LastProfile = "Default" }, false, false),
+                ("extension-waiting.png", new ChromeState { Found = true, LastProfile = "Default", DeveloperMode = true }, true, false),
+                ("extension-done.png", new ChromeState { Found = true, LastProfile = "Default", DeveloperMode = true, InstalledProfiles = { "Default" } }, true, true),
+            };
+            foreach (var (name, state, waiting, done) in states)
+            {
+                var setup = new ExtensionSetupWindow(module.Extension) { Left = -20000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+                setup.Show();
+                setup.Preview(state, waiting, done);
+                Pump(TimeSpan.FromMilliseconds(500));
+                var frame = (Border)setup.Content;
+                frame.Effect = null; // the shadow widens the visual's bounds and shifts the capture
+                frame.Margin = new Thickness(0);
+                Pump(TimeSpan.FromMilliseconds(200));
+                Render(frame, Path.Combine(output, name));
+                setup.Close();
             }
 
             Console.WriteLine("Snapshots written to " + output);

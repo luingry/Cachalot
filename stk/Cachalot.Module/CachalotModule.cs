@@ -11,6 +11,7 @@ using Cachalot.Module.Bridge;
 using Cachalot.Module.Channels;
 using Cachalot.Module.Downloads;
 using Cachalot.Module.Native;
+using Cachalot.Module.Setup;
 using Cachalot.Module.Views;
 
 namespace Cachalot.Module
@@ -31,6 +32,7 @@ namespace Cachalot.Module
         private LocalBridge _bridge;
         private ChannelWatcher _channels;
         private GlobalHotKey _hotKey;
+        private ExtensionSetup _extension;
         private bool _started;
 
         public void Initialize(IModuleContext context)
@@ -52,6 +54,8 @@ namespace Cachalot.Module
             _channels = new ChannelWatcher(_context, _prefs, () => Service);
             _channels.Start();
             ApplyIntegration();
+            // Idle priority: after the host finished starting; reads Chrome's files off the UI thread.
+            _context.Dispatcher.BeginInvoke(new Action(() => Extension.OnStartup()), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
 
         public void Stop()
@@ -115,6 +119,9 @@ namespace Cachalot.Module
         /// <summary>Folder that Chrome loads the unpacked extension from (stable across module updates).</summary>
         internal string ExtensionFolder => Path.Combine(_context.DataDirectory, "extensao-chrome");
 
+        /// <summary>Guided install, update and pairing of the Chrome extension.</summary>
+        internal ExtensionSetup Extension => _extension ?? (_extension = new ExtensionSetup(this, Path.Combine(_context.InstallDirectory, "extension", "chrome"), ExtensionFolder));
+
         /// <summary>Settings changed: save, update a running backend and turn the listeners on or off.</summary>
         internal void PreferencesChanged(bool integration = false)
         {
@@ -140,8 +147,11 @@ namespace Cachalot.Module
             }
             if (_prefs.BridgeEnabled && _bridge == null)
             {
+                var transient = new TransientBridge(_context, () => Service);
                 _bridge = new LocalBridge(() => _prefs.BridgeCode, _context.ModuleVersion?.ToString(3) ?? "0.0.0", _context.Log)
                 {
+                    TransientRequested = transient.HandleAsync,
+                    TransientPcmRequested = transient.PcmAsync,
                     DownloadRequested = OnBridgeDownloadAsync,
                     CookiesReceived = OnBridgeCookies,
                     DownloadsRequested = OnBridgeDownloads,
@@ -186,19 +196,6 @@ namespace Cachalot.Module
             bool sent = await service.AddAsync(new[] { link }, service.State.Folder ?? service.DefaultFolder);
             _context.Notify(sent ? "Na fila: " + ClipboardLinks.Short(link) : "O Cachalot não respondeu. Tente de novo.",
                 sent ? NotificationKind.Info : NotificationKind.Warning);
-        }
-
-        /// <summary>Copies the bundled extension to a stable folder, then opens Chrome's extensions page and the folder.</summary>
-        internal string PrepareExtension()
-        {
-            string source = Path.Combine(_context.InstallDirectory, "extension", "chrome");
-            if (!Directory.Exists(source))
-            {
-                return null;
-            }
-            string target = ExtensionFolder;
-            CopyFolder(source, target);
-            return target;
         }
 
         /// <summary>
@@ -321,18 +318,6 @@ namespace Cachalot.Module
                 opened = item != null && item.CanOpenFolder && service.OpenFolder(item, bringForward: true);
             }));
             return opened;
-        }
-
-        private static void CopyFolder(string source, string target)
-        {
-            Directory.CreateDirectory(target);
-            foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-            {
-                string relative = file.Substring(source.Length).TrimStart('\\', '/');
-                string destination = Path.Combine(target, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                File.Copy(file, destination, true);
-            }
         }
 
         private static void OpenFolder(string folder)

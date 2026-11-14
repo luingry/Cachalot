@@ -20,6 +20,9 @@ namespace Cachalot.Module.Downloads
         public string VideoQuality { get; set; } = VideoQualities.Best;
         public string AudioFormat { get; set; } = AudioFormats.Original;
 
+        /// <summary>Format of the sections the extension's transient mode saves; empty: ask on every download.</summary>
+        public string TransientFormat { get; set; } = TransientFormats.Ask;
+
         // Saída
         public string FilenameTemplate { get; set; } = "titulo";
         public bool OrganizeByPlatform { get; set; }
@@ -71,6 +74,18 @@ namespace Cachalot.Module.Downloads
         public bool ClipboardSuggest { get; set; } = true;
         public bool HotkeyEnabled { get; set; }
         public bool PreventSleep { get; set; } = true;
+
+        /// <summary>The "install the Chrome extension?" popup was shown: never offered on its own again (the settings button stays).</summary>
+        public bool ExtensionPromptShown { get; set; }
+
+        /// <summary>
+        /// Install folder (path + creation time) already checked and skipped because Chrome is missing or already has the
+        /// extension. Uninstalling keeps the data folder, so a reinstall gets a new key and is checked again.
+        /// </summary>
+        public string ExtensionCheckedInstall { get; set; } = string.Empty;
+
+        /// <summary>Hash of the bundled extension last copied to the Chrome folder (empty: never copied by this version).</summary>
+        public string ExtensionBuild { get; set; } = string.Empty;
 
         public List<Rule> Rules { get; set; } = new List<Rule>();
         public List<Channel> Channels { get; set; } = new List<Channel>();
@@ -124,6 +139,7 @@ namespace Cachalot.Module.Downloads
             Mode = Modes.Normalize(Mode);
             VideoQuality = VideoQualities.Normalize(VideoQuality);
             AudioFormat = AudioFormats.Normalize(AudioFormat);
+            TransientFormat = TransientFormats.Normalize(TransientFormat);
             Rules = Rules ?? new List<Rule>();
             Channels = Channels ?? new List<Channel>();
             foreach (Channel channel in Channels)
@@ -249,6 +265,20 @@ namespace Cachalot.Module.Downloads
         public static string Normalize(string value) => All.Contains(value) ? value : Original;
 
         public static string Label(string value) => value == Original ? "Original (sem converter)" : value.ToUpperInvariant();
+    }
+
+    /// <summary>Formats the transient mode cuts its sections into (servidor/transientes.py FORMATOS_EXPORTACAO).</summary>
+    internal static class TransientFormats
+    {
+        public const string Ask = "";
+        public static readonly string[] All = { "mp3", "wav", "flac" };
+
+        /// <summary>A known format in lower case, or <see cref="Ask"/>.</summary>
+        public static string Normalize(string value)
+        {
+            string v = (value ?? string.Empty).Trim().ToLowerInvariant();
+            return All.Contains(v) ? v : Ask;
+        }
     }
 
     /// <summary>Reads and writes settings.json atomically.</summary>

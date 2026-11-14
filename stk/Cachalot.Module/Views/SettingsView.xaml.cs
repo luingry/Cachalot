@@ -95,6 +95,15 @@ namespace Cachalot.Module.Views
                 new Option("opera", "Opera"),
                 new Option("vivaldi", "Vivaldi"),
             }, _prefs.CookiesBrowser ?? string.Empty);
+            LoadTransientFormat();
+            // the extension's "Lembrar escolha" changes it while this view may be alive: show the current one when it reappears
+            IsVisibleChanged += (s, e) =>
+            {
+                if (IsVisible)
+                {
+                    LoadTransientFormat();
+                }
+            };
 
             SubsOff.IsChecked = _prefs.Subtitles == "nao";
             SubsFile.IsChecked = _prefs.Subtitles == "arquivo";
@@ -208,6 +217,31 @@ namespace Cachalot.Module.Views
             }
         }
 
+        private void LoadTransientFormat()
+        {
+            bool loading = _loading;
+            _loading = true;
+            Fill(TransientFormatBox, new[] { new Option(TransientFormats.Ask, "Perguntar sempre") }
+                .Concat(TransientFormats.All.Select(f => new Option(f, f.ToUpperInvariant()))), TransientFormats.Normalize(_prefs.TransientFormat));
+            _loading = loading;
+            UpdateTransientFormatHint();
+        }
+
+        private void UpdateTransientFormatHint() =>
+            TransientFormatHint.Text = TransientFormats.Normalize(_prefs.TransientFormat).Length == 0
+                ? "A extensão pergunta MP3, WAV ou FLAC a cada download."
+                : "Escolha lembrada pela extensão. “Perguntar sempre” volta a perguntar.";
+
+        private void OnTransientFormatChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_loading)
+            {
+                _prefs.TransientFormat = TransientFormats.Normalize(Selected(TransientFormatBox));
+                UpdateTransientFormatHint();
+                Save();
+            }
+        }
+
         private void OnBrowserChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!_loading)
@@ -309,57 +343,12 @@ namespace Cachalot.Module.Views
             _prefs.BridgeCode = Preferences.NewBridgeCode();
             BridgeCode.Text = FormatCode(_prefs.BridgeCode);
             Save();
+            _module.Extension.PairingChanged();
         }
 
         private static string FormatCode(string code) => string.IsNullOrEmpty(code) || code.Length != 8 ? code : code.Substring(0, 4) + " " + code.Substring(4);
 
-        private void OnInstallExtension(object sender, RoutedEventArgs e)
-        {
-            string folder;
-            try
-            {
-                folder = _module.PrepareExtension();
-            }
-            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
-            {
-                _module.Context.Notify("Não deu para copiar a extensão: " + error.Message, NotificationKind.Error);
-                return;
-            }
-            if (folder == null)
-            {
-                _module.Context.Notify("Este pacote do Cachalot veio sem a extensão.", NotificationKind.Warning);
-                return;
-            }
-            try
-            {
-                Clipboard.SetText(folder);
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-            }
-            Start("explorer.exe", "\"" + folder + "\"");
-            if (!Start("chrome.exe", "chrome://extensions"))
-            {
-                _module.Context.Notify("Abra chrome://extensions no Chrome e carregue a pasta (caminho copiado).", NotificationKind.Info);
-            }
-            else
-            {
-                _module.Context.Notify("Modo do desenvolvedor → Carregar sem compactação → cole o caminho copiado.", NotificationKind.Info);
-            }
-        }
-
-        private static bool Start(string file, string arguments)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(file, arguments) { UseShellExecute = true });
-                return true;
-            }
-            catch (Exception error) when (error is System.ComponentModel.Win32Exception || error is InvalidOperationException)
-            {
-                return false;
-            }
-        }
+        private void OnInstallExtension(object sender, RoutedEventArgs e) => _module.Extension.Show();
 
         // ── shortcuts ──
 

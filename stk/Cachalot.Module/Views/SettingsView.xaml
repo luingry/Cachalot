@@ -52,8 +52,19 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="ExtensionHint" Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0"
-                           Text="Instalação: o Cachalot abre a pasta da extensão e a página de extensões do Chrome. Ligue o Modo do desenvolvedor, clique em Carregar sem compactação e escolha a pasta." />
+                           Text="O Cachalot copia a extensão, abre o Chrome e acompanha cada passo. Ela se pareia e se atualiza sozinha." />
                 <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE71B;" Content="Instalar no Chrome…" Click="OnInstallExtension" VerticalAlignment="Center" />
+            </Grid>
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="200" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Formato das seções (modo transiente)" Style="{StaticResource Text.BodyStrong}" />
+                    <TextBlock x:Name="TransientFormatHint" Style="{StaticResource Hint}" />
+                </StackPanel>
+                <ComboBox x:Name="TransientFormatBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnTransientFormatChanged" AutomationProperties.Name="Formato das seções do modo transiente" />
             </Grid>
         </StackPanel>
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anyActive, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
+import { SENT_GRACE_MS, anyActive, awaitingListing, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
 
 test("downloadKey ignores fragments and trailing slashes", () => {
   assert.equal(downloadKey("https://soundcloud.com/a/b/#t=1"), "https://soundcloud.com/a/b");
@@ -41,6 +41,14 @@ test("downloadView: the clicked button follows the download", () => {
   assert.ok(fail.title.startsWith("Conteúdo privado."));
   assert.ok(anyActive([null, run]));
   assert.ok(!anyActive([downloadView({ status: "concluido" }), fail, null]));
+});
+
+test("awaitingListing: a sent item Cachalot no longer lists stops showing Na fila", () => {
+  const now = 10_000_000;
+  assert.ok(awaitingListing(now - 2_000, now), "just sent: Cachalot may not list it yet");
+  assert.ok(!awaitingListing(now - SENT_GRACE_MS, now), "removed or cleared in Cachalot: Baixar again");
+  assert.ok(!awaitingListing(undefined, now), "never sent");
+  assert.equal(downloadView(undefined, awaitingListing(now - 3_600_000, now)), null);
 });
 
 test("currentItem: after sending again, the old finished item no longer counts", () => {

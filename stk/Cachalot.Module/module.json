@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,16 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.1.0",
+      "notes": [
+        "Installing Cachalot now offers to set up the Chrome extension: it copies the extension, opens Chrome and checks off each step as you go, and the extension pairs itself.",
+        "The Chrome extension now updates itself whenever Cachalot updates.",
+        "New transient mode in the extension: turns a song into its waveform, sliced on the beats and bars it detects, with loop preview, fades, undo and one-click download of every section.",
+        "Choose the format transient sections are saved in (MP3, WAV or FLAC), or be asked each time.",
+        "Fixed the extension's button getting stuck on \"✓ Na fila\" for something no longer in Cachalot."
+      ]
+    },
     {
       "version": "2.0.0",
       "notes": [

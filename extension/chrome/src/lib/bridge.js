@@ -5,6 +5,8 @@ export const DEFAULT_PORT = 47821;
 export const LAST_PORT = 47830;
 export const PING_TIMEOUT_MS = 1500;
 export const REQUEST_TIMEOUT_MS = 15000;
+/** Transient mode: preparing may start the backend, exporting cuts every section with ffmpeg. */
+export const TRANSIENT_TIMEOUTS_MS = Object.freeze({ prepare: 100000, status: 25000, pcm: 60000, export: 320000, open: 15000, format: 5000 });
 
 export const STORAGE_KEYS = Object.freeze({
   code: "pairingCode",
@@ -159,7 +161,7 @@ export function createBridgeClient({
     return { ok: true, state: "paired", port: found.port, version: found.version };
   }
 
-  async function call(method, path, body) {
+  async function call(method, path, body, { timeoutMs = requestTimeoutMs, binary = false } = {}) {
     const cfg = await readConfig();
     if (!cfg.code) return { ok: false, error: "unauthorized" };
     let port = cfg.override || cfg.remembered;
@@ -184,8 +186,9 @@ export function createBridgeClient({
                 body: JSON.stringify(body),
                 cache: "no-store",
               },
-          requestTimeoutMs,
+          timeoutMs,
         );
+        if (binary && res.status === 200) return { ok: true, status: 200, data: await res.arrayBuffer() };
         const data = await readJson(res);
         if (res.status === 401) return { ok: false, error: "unauthorized" };
         if (res.status === 400) return { ok: false, error: "bad_request", message: data?.error || "" };
@@ -249,7 +252,20 @@ export function createBridgeClient({
     return result;
   }
 
-  return { readConfig, status, pair, download, sendCookies, downloads, openFolder, show, cancel };
+  /**
+   * POST /transient/<op> (prepare, status, export, open, format): transient mode. Resolves to { ok: true, ...answer } or
+   * { ok: false, error, message } — "http" 422 carries the backend's own message (pt-BR) in message.
+   */
+  async function transient(op, body = {}) {
+    return call("POST", `/transient/${op}`, body, { timeoutMs: TRANSIENT_TIMEOUTS_MS[op] || requestTimeoutMs });
+  }
+
+  /** POST /transient/pcm: the analysis audio (mono PCM s16le) as { ok: true, data: ArrayBuffer }. */
+  async function transientPcm(id) {
+    return call("POST", "/transient/pcm", { id: String(id || "") }, { timeoutMs: TRANSIENT_TIMEOUTS_MS.pcm, binary: true });
+  }
+
+  return { readConfig, status, pair, download, sendCookies, downloads, openFolder, show, cancel, transient, transientPcm };
 }
 
 /** pt-BR message for a failed bridge call. */

@@ -13,6 +13,7 @@ using Cachalot.Module;
 using Cachalot.Module.Bridge;
 using Cachalot.Module.Downloads;
 using Cachalot.Module.Native;
+using Cachalot.Module.Setup;
 
 namespace Cachalot.Tests
 {
@@ -44,6 +45,8 @@ namespace Cachalot.Tests
             Run("download item: detail line", ItemDetail);
             Run("clipboard: first link", ClipboardLink);
             Run("bridge: auth, origin and CORS", () => BridgeAsync().GetAwaiter().GetResult());
+            Run("chrome: developer mode and unpacked extension", ChromeDetection);
+            Run("extension: mirror, pairing and build files", ExtensionInstall);
 
             if (args.Contains("--integration"))
             {
@@ -106,6 +109,8 @@ namespace Cachalot.Tests
             prefs.Mode = Modes.Audio;
             prefs.AudioFormat = "mp3";
             prefs.MaxConcurrent = 99;
+            Equal(TransientFormats.Ask, prefs.TransientFormat);
+            prefs.TransientFormat = "FLAC";
             prefs.Rules.Add(new Rule { Value = "soundcloud.com", Folder = @"C:\Musica", Mode = Modes.Audio });
             prefs.Channels.Add(new Channel { Url = "https://www.youtube.com/@x", IntervalMinutes = 1 });
             store.Save(prefs);
@@ -122,6 +127,14 @@ namespace Cachalot.Tests
             again.Dispose();
             Equal(Modes.Audio, back.Mode);
             Equal("mp3", back.AudioFormat);
+            Equal("flac", back.TransientFormat);
+
+            // Build from before the per-install check: its "offered" flag (set even when skipped) must not block a reinstall.
+            string legacy = TempDir();
+            File.WriteAllText(Path.Combine(legacy, "settings.json"), "{\"BridgeCode\":\"ABCD2345\",\"ExtensionOffered\":true}");
+            Preferences old = new PreferencesStore(legacy).Load();
+            True(!old.ExtensionPromptShown && old.ExtensionCheckedInstall == string.Empty && old.BridgeCode == "ABCD2345", "legacy ExtensionOffered ignored");
+            Equal(TransientFormats.Ask, TransientFormats.Normalize("ogg"));
             Equal(prefs.BridgeCode, back.BridgeCode);
             Equal(15, back.Channels[0].IntervalMinutes);
             Dictionary<string, object> config = back.ToBackendConfig();
@@ -273,6 +286,40 @@ namespace Cachalot.Tests
                     cancel.Headers.Add("Origin", "chrome-extension://abcdefghijklmnop");
                     Equal(HttpStatusCode.OK, (await http.SendAsync(cancel)).StatusCode);
                     Equal(HttpStatusCode.NotFound, await openFolder("{\"id\":\"run-1\"}", "Bearer ABCD2345"));
+
+                    // Transient mode: JSON operations go to the module, the PCM comes back as raw bytes.
+                    string transientOp = null;
+                    Dictionary<string, object> transientBody = null;
+                    bridge.TransientRequested = (op, b) =>
+                    {
+                        transientOp = op;
+                        transientBody = b;
+                        return Task.FromResult(new BridgeReply(200, new Dictionary<string, object> { ["ok"] = true, ["state"] = "pronto" }));
+                    };
+                    bridge.TransientPcmRequested = id => Task.FromResult(id == "job-1" ? new byte[] { 1, 2, 3, 4 } : null);
+                    Func<string, string, string, Task<HttpResponseMessage>> transient = (path, json, auth) =>
+                    {
+                        var request = new HttpRequestMessage(HttpMethod.Post, root + "/transient/" + path) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+                        if (auth != null)
+                        {
+                            request.Headers.Add("Authorization", auth);
+                        }
+                        request.Headers.Add("Origin", "chrome-extension://abcdefghijklmnop");
+                        return http.SendAsync(request);
+                    };
+                    Equal(HttpStatusCode.Unauthorized, (await transient("prepare", "{\"url\":\"https://a/b\"}", null)).StatusCode);
+                    HttpResponseMessage prepared = await transient("prepare", "{\"url\":\"https://a/b\",\"title\":\"T\"}", "Bearer ABCD2345");
+                    Equal(HttpStatusCode.OK, prepared.StatusCode);
+                    True(transientOp == "prepare" && (string)transientBody["title"] == "T" && (await prepared.Content.ReadAsStringAsync()).Contains("\"state\":\"pronto\""), "transient prepare forwarded");
+                    Equal(HttpStatusCode.NotFound, (await transient("delete", "{}", "Bearer ABCD2345")).StatusCode);
+                    Equal(HttpStatusCode.OK, (await transient("format", "{}", "Bearer ABCD2345")).StatusCode);
+                    Equal("format", transientOp);
+                    HttpResponseMessage pcm = await transient("pcm", "{\"id\":\"job-1\"}", "Bearer ABCD2345");
+                    Equal(HttpStatusCode.OK, pcm.StatusCode);
+                    Equal("application/octet-stream", pcm.Content.Headers.ContentType.MediaType);
+                    Equal("1,2,3,4", string.Join(",", await pcm.Content.ReadAsByteArrayAsync()));
+                    Equal(HttpStatusCode.NotFound, (await transient("pcm", "{\"id\":\"other\"}", "Bearer ABCD2345")).StatusCode);
+                    Equal(HttpStatusCode.BadRequest, (await transient("pcm", "{}", "Bearer ABCD2345")).StatusCode);
                 }
             }
             finally
@@ -409,6 +456,70 @@ namespace Cachalot.Tests
                 await Task.Delay(250);
             }
             return null;
+        }
+
+        private static void ChromeDetection()
+        {
+            string userData = TempDir();
+            string folder = Path.Combine(TempDir(), "extensao-chrome");
+            var probe = new ChromeProbe(userData);
+            File.WriteAllText(Path.Combine(userData, "Local State"),
+                "{\"profile\":{\"last_used\":\"Profile 2\",\"info_cache\":{\"Default\":{},\"Profile 2\":{}}}}");
+            Directory.CreateDirectory(Path.Combine(userData, "Default"));
+            Directory.CreateDirectory(Path.Combine(userData, "Profile 2"));
+
+            ChromeState state = probe.Read(folder);
+            True(state.Found && state.LastProfile == "Profile 2" && !state.DeveloperMode && !state.Installed, "fresh profiles: nothing on");
+
+            // Synced profile: developer mode under account_values, in Secure Preferences.
+            File.WriteAllText(Path.Combine(userData, "Profile 2", "Secure Preferences"),
+                "{\"account_values\":{\"extensions\":{\"ui\":{\"developer_mode\":true}}},\"extensions\":{\"settings\":{}}}");
+            True(probe.Read(folder).DeveloperMode, "developer mode from account_values");
+
+            // Developer mode in another profile does not count; the extension in any profile does.
+            File.WriteAllText(Path.Combine(userData, "Profile 2", "Secure Preferences"), "{\"extensions\":{\"settings\":{}}}");
+            string escaped = folder.Replace("\\", "\\\\");
+            File.WriteAllText(Path.Combine(userData, "Default", "Secure Preferences"),
+                "{\"extensions\":{\"ui\":{\"developer_mode\":true},\"settings\":{" +
+                "\"aaaa\":{\"location\":1,\"path\":\"" + escaped + "\"}," +
+                "\"bbbb\":{\"location\":4,\"path\":\"" + escaped.ToLowerInvariant() + "\\\\\",\"disable_reasons\":[1]}}}}");
+            state = probe.Read(folder);
+            True(!state.DeveloperMode, "developer mode is read from the last used profile");
+            True(state.Installed && state.InstalledProfiles.SequenceEqual(new[] { "Default" }), "unpacked from our folder (case and trailing slash ignored)");
+            True(state.InstalledButDisabled, "disabled through disable_reasons");
+
+            True(!new ChromeProbe(Path.Combine(userData, "missing")).Read(folder).Found, "no user data, no executable: not found");
+        }
+
+        private static void ExtensionInstall()
+        {
+            string bundle = TempDir();
+            string target = Path.Combine(TempDir(), "extensao-chrome");
+            File.WriteAllText(Path.Combine(bundle, "manifest.json"), "{\"version\":\"1\"}");
+            Directory.CreateDirectory(Path.Combine(bundle, "src"));
+            File.WriteAllText(Path.Combine(bundle, "src", "a.js"), "a");
+            var installer = new ExtensionInstaller(bundle, target);
+            True(installer.HasBundle && !installer.IsCopied, "bundle present, nothing copied yet");
+
+            string hash = installer.BundleHash();
+            installer.Install("ABCD2345", hash);
+            True(installer.IsCopied && File.Exists(Path.Combine(target, "src", "a.js")), "copied");
+            True(File.ReadAllText(Path.Combine(target, ExtensionInstaller.PairingFile)).Contains("ABCD2345"), "pairing file");
+            string build1 = File.ReadAllText(Path.Combine(target, ExtensionInstaller.BuildFile));
+            True(build1.Contains(hash.Substring(0, 12)), "build stamp carries the bundle hash");
+
+            // New bundle: removed files go away, the pairing file stays, the stamp changes.
+            File.Delete(Path.Combine(bundle, "src", "a.js"));
+            File.WriteAllText(Path.Combine(bundle, "src", "b.js"), "b");
+            string hash2 = installer.BundleHash();
+            True(hash2 != hash, "hash follows the bundle");
+            System.Threading.Thread.Sleep(1100);
+            installer.Install("ABCD2345", hash2);
+            True(!File.Exists(Path.Combine(target, "src", "a.js")) && File.Exists(Path.Combine(target, "src", "b.js")), "mirrored");
+            True(File.ReadAllText(Path.Combine(target, ExtensionInstaller.BuildFile)) != build1, "new stamp");
+
+            installer.WritePairing("WXYZ6789");
+            True(File.ReadAllText(Path.Combine(target, ExtensionInstaller.PairingFile)).Contains("WXYZ6789"), "new code written");
         }
 
         // ── tiny harness ──

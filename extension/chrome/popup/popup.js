@@ -20,9 +20,10 @@ import {
   youtubeLinkRows,
 } from "../src/lib/preview.js";
 import { PREVIEW_RULE_ID, previewHeaderRule } from "../src/lib/previewrule.js";
-import { anyActive, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
+import { anyActive, awaitingListing, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
 import { cookiesEnabledFor, setCookiesEnabledFor } from "../src/lib/settings.js";
 import { attachMse, dashPlan, parseHlsMaster, pickVariant } from "../src/lib/streams.js";
+import { WAVE_ICON, createTransientView, icon } from "./transient.js";
 
 const $ = (id) => document.getElementById(id);
 const CLOSED_POLL_MS = 4000;
@@ -50,6 +51,8 @@ const state = {
   linkSeen: new Map(), // YouTube video id -> when this popup first saw it
   linkTimer: null,
   newestFirst: true,
+  transient: null, // { rowId, view, host }: the card in transient mode
+  restoreTransient: "", // row id whose transient view was open when the popup closed
 };
 
 async function message(type, extra = {}) {
@@ -105,7 +108,7 @@ function updateButtons() {
     const b = $(id);
     if (!b.classList.contains("is-busy") && !b.classList.contains("is-done")) b.disabled = !enabled;
   }
-  for (const b of document.querySelectorAll(".media-row .btn")) {
+  for (const b of document.querySelectorAll(".media-row .btn, .transient-open")) {
     if (!b.classList.contains("is-busy") && !b.classList.contains("is-done")) b.disabled = !enabled;
   }
   $("syncCookies").disabled = !(enabled && $("cookieSwitch").checked);
@@ -299,14 +302,19 @@ async function sendPage(mode, button) {
 
 const SENT_KEY = "sentUrls";
 const DL_POLL_MS = 1000;
-const dl = { sent: new Set(), resent: new Map(), items: new Map(), timer: null };
+// sent: key -> when it was sent (ms). Only a recent send counts while Cachalot does not list the item.
+const dl = { sent: new Map(), resent: new Map(), items: new Map(), timer: null };
 
 async function loadSent() {
+  dl.sent = new Map();
   try {
     const sent = (await chrome.storage.local.get(SENT_KEY))[SENT_KEY] || {};
-    dl.sent = new Set(Object.keys(sent).map(downloadKey));
+    for (const [url, at] of Object.entries(sent)) {
+      const key = downloadKey(url);
+      dl.sent.set(key, Math.max(dl.sent.get(key) || 0, Number(at) || 0));
+    }
   } catch {
-    dl.sent = new Set();
+    // nothing sent is followed
   }
 }
 
@@ -314,7 +322,7 @@ function markSent(url) {
   const key = downloadKey(url);
   // Sent again after it was downloaded: wait for Cachalot's new item instead of the old one.
   if (dl.items.get(key)?.status === "concluido") dl.resent.set(key, Date.now());
-  dl.sent.add(key);
+  dl.sent.set(key, Date.now());
   pollDownloads();
 }
 
@@ -363,7 +371,7 @@ async function forgetSent(key) {
 function paintDownload(button) {
   const key = downloadKey(button.dataset.url);
   if (!key) return null;
-  const view = downloadView(currentItem(dl.items.get(key), dl.resent.get(key)), dl.sent.has(key));
+  const view = downloadView(currentItem(dl.items.get(key), dl.resent.get(key)), awaitingListing(dl.sent.get(key)));
   const label = button.id === "sendPage" ? button.querySelector(":scope > span:last-child") : button;
   if (button.classList.contains("is-busy") || !label) return view;
   paintFolder(button, view);
@@ -1132,7 +1140,7 @@ function renderRow(row) {
   button.dataset.url = row.url; // its download's progress shows here (see paintDownload)
   const done = state.rowFeedback.get(row.id);
   button.addEventListener("click", () => sendRow(row, li, button));
-  li.append(button);
+  li.append(button, transientButton(row, li));
   paintDownload(button);
 
   const playing = preview.tiles.get(row.id)?.player;
@@ -1142,7 +1150,90 @@ function renderRow(row) {
     li.classList.add("has-player");
   }
   if (done && !done.ok) li.append(el("p", "media-error msg msg-error", done.text));
+  if (state.transient?.rowId === row.id) {
+    // the card in transient mode keeps its view across list updates
+    li.classList.add("is-transient");
+    li.append(state.transient.view.node);
+    state.transient.host = li;
+  } else if (state.restoreTransient === row.id) {
+    queueMicrotask(() => openTransient(row, li));
+  }
   return li;
+}
+
+// ---- Transient mode ------------------------------------------------------------
+// The waveform icon right of "Baixar" turns the card into the transient view
+// (popup/transient.js): waveform, transients, sections to download one by one
+// or all at once. One card at a time; reopening the popup brings it back.
+
+const TRANSIENT_TITLE = "Modo transiente: waveform e seções da música";
+const TRANSIENT_OPEN_KEY = "transientOpen:";
+
+function transientButton(row, host) {
+  const b = el("button", row.kind === "page" ? "icon-btn transient-open" : "icon-btn icon-btn-sm transient-open");
+  b.type = "button";
+  b.title = TRANSIENT_TITLE;
+  b.setAttribute("aria-label", TRANSIENT_TITLE);
+  b.append(icon(WAVE_ICON));
+  b.disabled = !canSend();
+  b.addEventListener("click", () => openTransient(row, host));
+  return b;
+}
+
+function rowTitle(row) {
+  if (row.kind === "page") return state.tab?.title || row.url;
+  const name = row.meta?.title || row.name || row.url;
+  const artist = row.artist || row.meta?.artist;
+  return artist ? `${artist} - ${name}` : name;
+}
+
+/** What Cachalot needs to fetch the row's audio: the page, a link the page shows, or a sniffed media (by id). */
+function transientRequest(row) {
+  const cookies = undefined; // the background applies the site's "Enviar cookies" switch, as stored
+  const tabId = state.tab.id;
+  if (row.kind === "page") return { tabId, url: state.tab.url, title: "", cookies }; // Cachalot finds the real title
+  if (row.kind === "youtube" || row.kind === "track") return { tabId, url: row.url, title: rowTitle(row), cookies };
+  return { tabId, id: row.id, title: row.meta?.title ? rowTitle(row) : state.tab.title || "", cookies };
+}
+
+function openTransient(row, host) {
+  if (state.transient?.rowId === row.id) return;
+  closeTransient();
+  state.restoreTransient = "";
+  hidePop();
+  stopCurrent();
+  const view = createTransientView({
+    request: transientRequest(row),
+    title: rowTitle(row),
+    message,
+    onClose: () => closeTransient({ destroyed: true }),
+  });
+  state.transient = { rowId: row.id, view, host };
+  host.classList.add("is-transient");
+  host.append(view.node);
+  document.body.classList.add("has-transient");
+  requestAnimationFrame(() => host.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  chrome.storage.session.set({ [TRANSIENT_OPEN_KEY + state.tab.id]: row.id }).catch(() => {});
+}
+
+function closeTransient({ destroyed = false } = {}) {
+  const t = state.transient;
+  if (!t) return;
+  state.transient = null;
+  if (!destroyed) t.view.destroy();
+  t.view.node.remove();
+  t.host?.classList.remove("is-transient");
+  document.body.classList.remove("has-transient");
+  chrome.storage.session.remove(TRANSIENT_OPEN_KEY + state.tab.id).catch(() => {});
+}
+
+async function loadTransientRestore() {
+  if (!state.tab) return;
+  try {
+    state.restoreTransient = (await chrome.storage.session.get(TRANSIENT_OPEN_KEY + state.tab.id))[TRANSIENT_OPEN_KEY + state.tab.id] || "";
+  } catch {
+    state.restoreTransient = "";
+  }
 }
 
 async function sendRow(row, li, button) {
@@ -1328,12 +1419,17 @@ async function init() {
   $("extVersion").textContent = `v${chrome.runtime.getManifest().version}`;
   state.tab = await resolveTab();
   renderPage();
+  await loadTransientRestore();
   const main = mainRow();
   if (main) {
     // the page's own video: its preview takes the favicon's place once it loads
     const node = tileFor(main);
     node.classList.add("page-thumb");
     document.querySelector(".page-head").prepend(node);
+    const card = document.querySelector(".page-card");
+    $("sendAudio").after(transientButton(main, card));
+    document.querySelector(".actions").classList.add("has-transient");
+    if (state.restoreTransient === main.id) openTransient(main, card);
   }
   setConnection("checking");
 

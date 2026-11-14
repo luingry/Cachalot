@@ -68,6 +68,19 @@ export function currentItem(item, resentAt = 0) {
   return (Number(item.created) || 0) * 1000 < resentAt - 1000 ? undefined : item;
 }
 
+/**
+ * How long a sent URL that Cachalot does not list (yet) still shows "✓ Na fila". Past it the item was
+ * removed or cleared in Cachalot (or never arrived), so the button offers "Baixar" again instead of
+ * waiting forever.
+ */
+export const SENT_GRACE_MS = 60_000;
+
+/** sentAt (ms) is recent enough that Cachalot may simply not list the item yet. */
+export function awaitingListing(sentAt, now = Date.now()) {
+  const at = Number(sentAt) || 0;
+  return at > 0 && now - at < SENT_GRACE_MS;
+}
+
 /** Polling is worth it while something sent is still on its way. */
 export function anyActive(views) {
   return views.some((v) => v && (v.state === "wait" || v.state === "run"));

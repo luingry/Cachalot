@@ -70,6 +70,7 @@ import galerias
 import nativos
 import opcoes_ytdlp
 import torrents
+import transientes
 
 # Fallback headless (blob/MSE) — não importa Playwright aqui em cima (ver sniffer.py).
 try:
@@ -354,6 +355,8 @@ def publico(dl: dict) -> dict:
 
 
 async def broadcast(mensagem: dict):
+    if _mensagem_oculta(mensagem):
+        return
     if clientes:
         dados = json.dumps(mensagem, ensure_ascii=False, default=str)
         await asyncio.gather(*[ws.send(dados) for ws in clientes], return_exceptions=True)
@@ -868,7 +871,7 @@ def opcoes_de(dados: dict) -> dict:
 def ja_na_fila(url: str) -> bool:
     chave = fontes.normalizar_para_comparar(url)
     return any(fontes.normalizar_para_comparar(d["url"]) == chave and d.get("status") in ATIVOS + ("pausado",)
-               for d in downloads.values())
+               and d["id"] not in _ocultos for d in downloads.values())
 
 
 # ── Execução de um download ───────────────────────────────────────────────────
@@ -1783,7 +1786,7 @@ async def handler(ws):
     _houve_cliente_ws_para_inatividade = True
     marcar_atividade_download_servidor()
     print(f"[+] Cliente conectado  ({len(clientes)} total)")
-    await ws.send(json.dumps({"tipo": "estado_inicial", "downloads": [publico(d) for d in downloads.values()],
+    await ws.send(json.dumps({"tipo": "estado_inicial", "downloads": [publico(d) for d in downloads.values() if d["id"] not in _ocultos],
                               "dependencias": dependencias.estado()}, ensure_ascii=False, default=str))
     try:
         async for msg in ws:
@@ -1845,7 +1848,8 @@ async def tratar(ws, dados: dict):
 
     elif acao == "pausar_todos":
         for dl_id in list(downloads):
-            pausar(dl_id)
+            if dl_id not in _ocultos:
+                pausar(dl_id)
 
     elif acao == "retomar":
         await retomar(dados)
@@ -1913,8 +1917,162 @@ async def tratar(ws, dados: dict):
     elif acao == "dependencias":
         await ws.send(json.dumps({"tipo": "dependencias", "estado": dependencias.estado()}, ensure_ascii=False))
 
+    elif acao == "transiente":
+        await tratar_transiente(ws, dados)
+
     elif acao == "encerrar_servidor":
         await disparar_encerramento_vdget()
+
+
+# ── Modo transiente ───────────────────────────────────────────────────────────
+# A extensão pede o áudio de uma mídia para desenhar a waveform e achar os transientes. O áudio vem por um
+# download oculto (o mesmo motor, só áudio, sem converter) para o cache; depois vira PCM mono de 22 050 Hz.
+# Cada pedido leva um "pedido" e recebe {"tipo": "transiente", "pedido", ...} só neste cliente.
+_ocultos: set[str] = set()                       # ids de downloads que a interface não vê
+_transientes: dict[str, transientes.Trabalho] = {}
+
+
+def _mensagem_oculta(mensagem: dict) -> bool:
+    if not _ocultos:
+        return False
+    d = mensagem.get("download")
+    if isinstance(d, dict) and d.get("id") in _ocultos:
+        return True
+    return mensagem.get("tipo") == "remover" and mensagem.get("id") in _ocultos
+
+
+async def tratar_transiente(ws, dados: dict) -> None:
+    op = dados.get("op")
+    try:
+        if op == "preparar":
+            resposta = await _transiente_preparar(dados)
+        elif op == "estado":
+            resposta = _transiente_estado(dados.get("id"))
+        elif op == "exportar":
+            resposta = await _transiente_exportar(dados)
+        elif op == "abrir":
+            resposta = _transiente_abrir(dados.get("id"))
+        else:
+            resposta = {"ok": False, "erro": f"operação desconhecida: {op}"}
+    except Exception as e:
+        print(f"[!] transiente {op}: {type(e).__name__}: {e}")
+        resposta = {"ok": False, "erro": str(e) or type(e).__name__}
+    await ws.send(json.dumps({"tipo": "transiente", "pedido": dados.get("pedido"), **resposta}, ensure_ascii=False, default=str))
+
+
+async def _transiente_preparar(dados: dict) -> dict:
+    url = str(dados.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return {"ok": False, "erro": "Link inválido."}
+    if fontes.eh_playlist(url):
+        return {"ok": False, "erro": "O modo transiente trabalha com uma faixa por vez, não com playlists."}
+    url = transientes.sem_lista_anexada(url) if fontes.tem_lista_anexada(url) else url
+    tid = transientes.chave(url)
+    atual = _transientes.get(tid)
+    if atual and atual.estado != "erro":
+        return {"ok": True, **atual.publico()}
+    raiz = transientes.pasta_raiz(PASTA_DADOS)
+    pasta = os.path.join(raiz, tid)
+    pronto = transientes.carregar(tid, url, pasta)
+    if pronto:
+        _transientes[tid] = pronto
+        return {"ok": True, **pronto.publico()}
+    em_uso = {t for t, tr in _transientes.items() if tr.estado in ("baixando", "decodificando")} | {tid}
+    transientes.podar_cache(raiz, em_uso=em_uso)
+    shutil.rmtree(pasta, ignore_errors=True)
+    os.makedirs(pasta, exist_ok=True)
+    trabalho = transientes.Trabalho(tid, url, pasta, str(dados.get("titulo") or "").strip())
+    o = opcoes_de(dados)
+    # O áudio como veio (sem converter nem cortar patrocínios): é dele que as seções são cortadas.
+    o.update(modo="audio", formato_audio="original", modelo_nome="titulo", organizar_por_plataforma=False,
+             legendas="nao", embutir_miniatura=False, embutir_metadados=False, dividir_capitulos=False,
+             sponsorblock="nao", pular_existentes=False)
+    trabalho.dl_id = criar_download(url, pasta, o, titulo=trabalho.titulo)
+    _ocultos.add(trabalho.dl_id)
+    _transientes[tid] = trabalho
+    asyncio.create_task(_transiente_acompanhar(trabalho))
+    if fila:
+        fila.acordar()
+    return {"ok": True, **trabalho.publico()}
+
+
+async def _transiente_acompanhar(t: transientes.Trabalho) -> None:
+    """Segue o download oculto até o fim e decodifica o áudio para a análise."""
+    dl_id = t.dl_id
+    pedido = t.titulo  # o título que a extensão mandou vale mais que o do motor (que pode ser o nome do arquivo)
+    try:
+        while True:
+            dl = downloads.get(dl_id)
+            if dl is None:
+                raise RuntimeError("O download do áudio foi cancelado.")
+            status = dl.get("status")
+            t.progresso = float(dl.get("progresso") or 0)
+            t.fase = dl.get("fase") or ("Na fila" if status == "pendente" else "")
+            titulo = dl.get("titulo") or ""
+            if not pedido and titulo and titulo != dl.get("url"):
+                t.titulo = transientes.titulo_de(titulo)  # o título que o motor achou, sem extensão de arquivo
+            if status == "concluido":
+                arquivo = dl.get("arquivo") or ""
+                t.arquivo = arquivo if os.path.isfile(arquivo) else transientes.achar_audio(t.pasta)
+                break
+            if status == "erro":
+                raise RuntimeError(dl.get("erro") or "Não foi possível baixar o áudio.")
+            await asyncio.sleep(0.3)
+        if not t.arquivo:
+            raise RuntimeError("O download terminou sem arquivo de áudio.")
+        if not t.titulo:
+            t.titulo = transientes.titulo_de(os.path.basename(t.arquivo))
+        t.estado, t.fase, t.progresso = "decodificando", "Analisando o áudio", 100.0
+        t.duracao = await asyncio.get_running_loop().run_in_executor(
+            None, transientes.decodificar, dependencias.ffmpeg(), t.arquivo, t.pcm)
+        t.salvar()
+        t.estado, t.fase = "pronto", ""
+    except Exception as e:
+        t.estado, t.fase = "erro", ""
+        texto = mensagem_erro_download(e)
+        diag = diagnostico.classificar(texto)
+        t.erro = diag.mensagem if diag.categoria != "unknown" else texto
+        print(f"[transiente] {t.url}: {texto[:300]}")
+    finally:
+        downloads.pop(dl_id, None)
+        controles.pop(dl_id, None)
+        _ocultos.discard(dl_id)
+        marcar_atividade_download_servidor()
+
+
+def _transiente_estado(tid) -> dict:
+    t = _transientes.get(str(tid or ""))
+    if not t:
+        return {"ok": False, "erro": "não encontrado"}
+    return {"ok": True, **t.publico()}
+
+
+async def _transiente_exportar(dados: dict) -> dict:
+    t = _transientes.get(str(dados.get("id") or ""))
+    if not t or t.estado != "pronto":
+        return {"ok": False, "erro": "não encontrado"}
+    segmentos = transientes.validar_segmentos(dados.get("segmentos"), t.duracao)
+    if not segmentos:
+        return {"ok": False, "erro": "Nenhuma seção para baixar."}
+    destino = str(dados.get("destino") or "").strip() or PASTA_DOWNLOAD_PADRAO
+    titulo = str(dados.get("titulo") or "").strip() or t.titulo
+    caminho, arquivos = await asyncio.get_running_loop().run_in_executor(
+        None, transientes.exportar, dependencias.ffmpeg(), t.arquivo, segmentos, destino, titulo, bool(dados.get("pasta")),
+        transientes.normalizar_formato(dados.get("formato")))
+    t.ultimo = caminho
+    marcar_atividade_download_servidor()
+    return {"ok": True, "arquivos": len(arquivos), "caminho": caminho}
+
+
+def _transiente_abrir(tid) -> dict:
+    t = _transientes.get(str(tid or ""))
+    if not t or not t.ultimo:
+        return {"ok": False, "erro": "não encontrado"}
+    if os.path.isfile(t.ultimo):
+        return {"ok": revelar_pasta_do_arquivo(t.ultimo)}
+    if os.path.isdir(t.ultimo):
+        return {"ok": abrir_pasta(t.ultimo)}
+    return {"ok": False, "erro": "não encontrado"}
 
 
 def pausar(dl_id: str | None):

@@ -17,12 +17,55 @@ Arquitetura, build, releases e variáveis do backend. Para usar o Cachalot, veja
 | `servidor.py` | Backend: WebSocket, fila (`Agendador`), motores e reservas |
 | `fontes.py`, `nativos.py`, `opcoes_ytdlp.py`, `diagnostico.py` | Reconhecimento, extratores próprios, opções do yt-dlp, erros |
 | `direto.py`, `galerias.py`, `torrents.py`, `sniffer.py`, `dependencias.py` | Motores HTTP, gallery-dl, libtorrent, navegador invisível, instalação sob demanda |
+| `transientes.py` | Modo transiente: cache do áudio, PCM para a análise, corte das seções em WAV |
 | `stk/Cachalot.Module` | Módulo WPF (.NET Framework 4.8): página, configurações, ponte da extensão, canais, atalho |
 | `stk/Cachalot.DevHost` | Roda o módulo fora do host; `--snapshot <pasta>` renderiza a UI |
 | `stk/Cachalot.Tests` | Testes C# (`--integration` usa o backend real e a rede) |
 | `tests/` | Testes do backend Python (`py -3 -m unittest discover -s tests`) |
 | `extension/chrome` | Extensão MV3 ([README](../extension/README.md)) |
 | `assets/brand/cachalot-icon.json` | Fonte vetorial do ícone; `stk/scripts/render-icon.ps1` gera PNGs e SVG |
+
+## Modo transiente
+
+A extensão transforma o cartão de uma mídia na waveform do áudio, cortada nos transientes. Divisão do trabalho:
+
+1. **Ponte** (`POST /transient/prepare|status|pcm|export|open`, `stk/Cachalot.Module/Bridge/TransientBridge.cs`):
+   repassa à ação `transiente` do backend (pedido/resposta por `pedido`) e traduz as respostas; caminhos no disco
+   nunca chegam à extensão. `pcm` devolve bytes (`application/octet-stream`), lidos só da pasta de dados do módulo.
+2. **Backend** (`servidor.py` + `transientes.py`): `preparar` cria um download **oculto** (só áudio, `original`, sem
+   sponsorblock nem capa) para `<dados>/transientes/<sha1 do link>`; `_ocultos` impede que ele chegue à interface
+   (broadcast, `estado_inicial`, `ja_na_fila`, pausar todos). Pronto, o ffmpeg tira uma cópia mono de 22 050 Hz
+   (`analise.pcm`, até 30 min). O cache guarda as 8 faixas mais recentes. `exportar` corta cada seção do arquivo
+   original em WAV, FLAC ou MP3 (`formato`; a ponte manda o lembrado em `Preferences.TransientFormat`, vazio = a
+   extensão pergunta, e `POST /transient/format` o devolve) (`-ss` antes do `-i`, fade de 3 ms no fim) na pasta de downloads; os fades de cada seção
+   viram um `aeval` por amostra com ganho `x^p`, `p = 4^-curva` (a mesma fórmula de `fadeGain` na extensão).
+3. **Extensão** (`src/lib/transients.js`, `popup/transient.js`): fluxo espectral multibanda (5 faixas normalizadas
+   cada uma, estilo SuperFlux), picos com limiar adaptativo e força relativa, ataque refinado na energia fina,
+   BPM por autocorrelação com preferência por ~120, fase do tempo e tempo forte pelo grave. Os tempos são
+   rastreados (`trackBeats`: cada tempo puxado até a batida forte vizinha) e as grades (`gridLines`) cortam em cada
+   linha, então a seção tem o tamanho da divisão; a sensibilidade filtra os candidatos do Auto e os ataques em que um
+   corte de grade pode grudar (até 15 ms). Tudo recalcula em tempo real. As edições do usuário (divisórias fixadas,
+   suprimidas, início/fim, `origin` = início da música marcado pela bandeira) sobrevivem a uma nova detecção.
+   `withOrigin` põe o compasso 1 no início marcado: a grade é contada dali e, antes dele, não há cortes.
+
+## Instalação da extensão pelo módulo
+
+`stk/Cachalot.Module/Setup`: na primeira vez que o módulo inicia com a janela do SwissTechKnife visível,
+`ExtensionSetup` abre `Views/ExtensionSetupWindow` (se o Chrome existe e a extensão ainda não está nele);
+`Preferences.ExtensionPromptShown` (o popup já apareceu) impede que pergunte de novo. Sem Chrome, ou com a extensão já carregada, ele só anota a instalação atual em `ExtensionCheckedInstall` (pasta do módulo + data de criação): desinstalar mantém a pasta de dados, então reinstalar reavalia. O botão **Instalar no Chrome…** abre o mesmo assistente.
+
+- **Detecção** (`ChromeProbe`, só leitura): `Local State` → `profile.last_used`; em `Preferences` e
+  `Secure Preferences` de cada perfil, o modo do desenvolvedor fica em `extensions.ui.developer_mode` **ou**
+  `account_values.extensions.ui.developer_mode` (perfil sincronizado com conta Google), e a extensão descompactada é
+  uma entrada de `extensions.settings` com `location: 4` e `path` igual à pasta. Ambos são protegidos por MAC
+  (`protection.macs`): escrever neles faz o Chrome descartar/resetar, por isso o usuário liga o modo e carrega a
+  pasta; o assistente só acompanha (a cada 1,5 s, relendo apenas arquivos alterados) e a ponte (`LocalBridge.LastPairedContact`)
+  confirma na hora quando a extensão chama com o código certo.
+- **Cópia** (`ExtensionInstaller`): espelha `extension/chrome` do pacote em `<dados>/extensao-chrome` e grava
+  `pairing.json` (código da ponte: a extensão se pareia sozinha, `src/lib/selfsetup.js`) e `build.json` (carimbo novo a
+  cada cópia). Na partida do módulo, se a pasta existe e o hash do pacote mudou (`Preferences.ExtensionBuild`), copia de
+  novo; a extensão compara o `build.json` do disco com o que carregou e chama `chrome.runtime.reload()` (sem popup ou
+  página da extensão aberta, no máximo uma vez a cada 5 min). `sync-extension.ps1` também grava um `build.json`.
 
 ## Build, testes e release
 
