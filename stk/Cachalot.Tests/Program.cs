@@ -37,6 +37,7 @@ namespace Cachalot.Tests
             Run("cookies: import splits by site", CookieImport);
             Run("cookies: browser cookies to Netscape", CookieFromBrowser);
             Run("preferences: round trip and defaults", PreferencesRoundTrip);
+            Run("cookies: global and per-site switches", CookieSwitches);
             // Own STA thread: RunOnDispatcher shuts its dispatcher down, and the integration test needs this one.
             var upgrade = new Thread(() => RunOnDispatcher("upgrade: 1.x state.json opens the page", LegacyStateAsync));
             upgrade.SetApartmentState(ApartmentState.STA);
@@ -141,6 +142,74 @@ namespace Cachalot.Tests
             Equal(10, (int)config["simultaneos"]);
             Equal("audio", (string)config["modo"]);
             Equal(1, ((List<object>)config["regras"]).Count);
+        }
+
+        private static void CookieSwitches()
+        {
+            // Defaults, and a settings.json from before the switches (missing or null list).
+            var fresh = new Preferences();
+            fresh.Normalize();
+            True(fresh.CookiesEnabled && fresh.CookiesDisabledSites.Count == 0, "defaults: on, no site off");
+            string legacy = TempDir();
+            File.WriteAllText(Path.Combine(legacy, "settings.json"), "{\"BridgeCode\":\"ABCD2345\",\"CookiesDisabledSites\":null}");
+            Preferences old = new PreferencesStore(legacy).Load();
+            True(old.CookiesEnabled && old.CookiesDisabledSites != null && old.CookiesDisabledSites.Count == 0, "null list from an old settings.json");
+
+            // Normalize: registrable domain, lower case, trimmed, no duplicates or junk.
+            var prefs = new Preferences
+            {
+                CookiesDisabledSites = new List<string> { " Instagram.com ", "https://www.instagram.com/p/abc", "music.youtube.com", "", "localhost", "a b.com", "www.bbc.co.uk:443" },
+            };
+            prefs.Normalize();
+            Equal("bbc.co.uk,instagram.com,youtube.com", string.Join(",", prefs.CookiesDisabledSites));
+            Equal("instagram.com", Preferences.NormalizeSite("user:pw@cdn.instagram.com:8080/x"));
+            Equal(string.Empty, Preferences.NormalizeSite("not a site"));
+
+            // Matching: host, parent domains and the site's aliases.
+            True(!prefs.CookiesAllowedFor("www.instagram.com"), "host under a disabled site");
+            True(!prefs.CookiesAllowedFor("instagram.com"), "the site itself");
+            True(!prefs.CookiesAllowedFor("youtu.be"), "alias of a disabled site");
+            True(prefs.CookiesAllowedFor("notinstagram.com"), "suffix without a dot does not match");
+            True(prefs.CookiesAllowedFor("vimeo.com"), "other sites keep their cookies");
+            var x = new Preferences { CookiesDisabledSites = new List<string> { "x.com" } };
+            True(!x.CookiesAllowedFor("mobile.twitter.com"), "twitter.com follows x.com");
+            True(prefs.SetSiteCookies("www.instagram.com", true) && prefs.CookiesAllowedFor("instagram.com"), "turned back on");
+            True(prefs.SetSiteCookies("vimeo.com", false) && !prefs.CookiesAllowedFor("player.vimeo.com"), "turned off");
+            True(!prefs.SetSiteCookies("nada", false), "not a site");
+            prefs.CookiesEnabled = false;
+            True(!prefs.CookiesAllowedFor("example.com"), "global switch off");
+
+            // Backend keys and persistence.
+            Dictionary<string, object> config = prefs.ToBackendConfig();
+            Equal(false, (bool)config["cookies_ativos"]);
+            Equal("bbc.co.uk,vimeo.com,youtube.com", string.Join(",", ((List<object>)config["cookies_sites_off"]).Cast<string>()));
+            string dir = TempDir();
+            var store = new PreferencesStore(dir);
+            store.Save(prefs);
+            Preferences back = store.Load();
+            True(!back.CookiesEnabled && back.CookiesDisabledSites.SequenceEqual(prefs.CookiesDisabledSites), "round trip");
+
+            // The extension's cookies are not saved for a disabled site (POST /cookies answers 0).
+            var module = new CachalotModule();
+            string data = TempDir();
+            module.Initialize(new TestContext(data));
+            try
+            {
+                DownloadService service = module.Service;
+                var cookie = new[] { new Dictionary<string, object> { ["name"] = "sessionid", ["value"] = "v", ["domain"] = ".instagram.com", ["path"] = "/" } };
+                service.Prefs.SetSiteCookies("instagram.com", false);
+                Equal(0, service.SaveBrowserCookies("www.instagram.com", cookie));
+                True(!File.Exists(Path.Combine(data, "cookies", "instagram.com.txt")), "nothing written for a disabled site");
+                service.Prefs.SetSiteCookies("instagram.com", true);
+                service.Prefs.CookiesEnabled = false;
+                Equal(0, service.SaveBrowserCookies("www.instagram.com", cookie));
+                service.Prefs.CookiesEnabled = true;
+                Equal(1, service.SaveBrowserCookies("www.instagram.com", cookie));
+            }
+            finally
+            {
+                module.Dispose();
+            }
         }
 
         /// <summary>The state.json VDGET 1.1.0 left behind (legacy "Quality", no "Unfinished").</summary>

@@ -25,6 +25,14 @@ Arquitetura, build, releases e variáveis do backend. Para usar o Cachalot, veja
 | `extension/chrome` | Extensão MV3 ([README](../extension/README.md)) |
 | `assets/brand/cachalot-icon.json` | Fonte vetorial do ícone; `stk/scripts/render-icon.ps1` gera PNGs e SVG |
 
+## Cookies
+
+A extensão sempre manda os cookies da página junto com `POST /download`, `POST /cookies` e `POST /transient/prepare`; quem decide se eles valem é o módulo. `Preferences.CookiesEnabled` (chave `cookies_ativos`) desliga tudo e `Preferences.CookiesDisabledSites` (`cookies_sites_off`, domínios registráveis normalizados por `Preferences.NormalizeSite`) desliga por site, em **Configurações › Login e cookies**.
+
+- **Módulo** (`DownloadService.SaveBrowserCookies`): não grava em `cookies/<site>.txt` o que chega de um site desligado (`POST /cookies` responde `count: 0`).
+- **Backend** (`servidor.cookies_permitidos`): desligado, `cookies_para` devolve `{}` e o download vai sem nada: nem `cookies/<site>.txt`, nem o arquivo importado, nem `cookies.txt`, nem `--cookies-from-browser` (as reservas do YouTube pulam as estratégias de cookies; o extrator nativo vai sem `Cookie`).
+- **Casamento** (igual nos dois lados, `Preferences.CookiesAllowedFor` e `_chaves_site`): o host, cada domínio acima dele e os apelidos do site (`youtu.be`/`youtube-nocookie.com` → `youtube.com`, `x.com` ↔ `twitter.com`). No backend também conta o host do `Referer`/`Origin` capturado pela extensão (link de CDN vindo de uma página desligada).
+
 ## Modo transiente
 
 A extensão transforma o cartão de uma mídia na waveform do áudio, cortada nos transientes. Divisão do trabalho:

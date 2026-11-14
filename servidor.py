@@ -307,6 +307,8 @@ CONFIG_PADRAO = {
     "torrent_porta": 6881,
     "torrent_upnp": True,
     "torrent_trackers": True,
+    "cookies_ativos": True,      # False: nenhum download usa cookies (os da extensão, importados ou do navegador)
+    "cookies_sites_off": [],     # sites (domínio registrável) que nunca recebem cookies; ver cookies_permitidos
 }
 config: dict = {**opcoes_ytdlp.PADROES, **CONFIG_PADRAO}
 
@@ -540,7 +542,40 @@ def cookies_gerenciados(url: str) -> str:
     return ""
 
 
+# Mesmos apelidos de cookies_gerenciados: desligar youtube.com também vale para youtu.be.
+_APELIDOS_SITE = {"youtu.be": ("youtube.com",), "youtube-nocookie.com": ("youtube.com",),
+                  "x.com": ("twitter.com",), "twitter.com": ("x.com",)}
+
+
+def _chaves_site(host: str) -> set[str]:
+    """O host, cada domínio acima dele e os apelidos do site (www.music.youtube.com → music.youtube.com, youtube.com, com)."""
+    partes = [p for p in (host or "").lower().strip(".").split(".") if p]
+    chaves = {".".join(partes[i:]) for i in range(len(partes))}
+    chaves.update(_APELIDOS_SITE.get(fontes.dominio_raiz(".".join(partes)), ()))
+    return chaves
+
+
+def cookies_permitidos(url: str, o: dict) -> bool:
+    """Cookies podem ir para este download? Não quando estão desligados nas configurações (cookies_ativos) ou quando o
+    site do link, ou o da página de onde ele veio (Referer/Origin capturados pela extensão), está em cookies_sites_off.
+    Desligado: nada de cookies/<site>.txt, cookies.txt, arquivo importado nem cookies do navegador."""
+    if not o.get("cookies_ativos", True):
+        return False
+    desligados = {str(s).strip().lower().strip(".") for s in (o.get("cookies_sites_off") or []) if str(s).strip()}
+    if not desligados:
+        return True
+    hosts = [fontes.host_de(url)]
+    cab = o.get("cabecalhos") or {}
+    for nome in ("Referer", "Origin"):
+        valor = next((v for k, v in cab.items() if str(k).lower() == nome.lower()), "") if isinstance(cab, dict) else ""
+        if valor:
+            hosts.append(fontes.host_de(str(valor)))
+    return not any(_chaves_site(h) & desligados for h in hosts if h)
+
+
 def cookies_para(url: str, o: dict) -> dict:
+    if not cookies_permitidos(url, o):
+        return {}
     gerenciado = cookies_gerenciados(url)
     if gerenciado:
         return {"arquivo": gerenciado}
@@ -1232,13 +1267,14 @@ def _estrategias_youtube(url: str, o: dict, erro: str) -> list[tuple[str, dict]]
     t = erro.lower()
     estrategias: list[tuple[str, dict]] = []
     if "confirm you" in t and "not a bot" in t or "po token" in t:
-        vistos = set()
-        for caminho in [cookies_gerenciados(url), o.get("cookies_arquivo") or "", *caminhos_cookies_txt()]:
-            if caminho and os.path.isfile(caminho) and caminho not in vistos:
-                vistos.add(caminho)
-                estrategias.append((f"cookies ({os.path.basename(caminho)})", {"cookies": {"arquivo": caminho}}))
-        for nav in NAVEGADORES_COOKIES:
-            estrategias.append((f"cookies do {nav}", {"cookies": {"navegador": nav}}))
+        if cookies_permitidos(url, o):  # desligados nas configurações: só os outros clientes
+            vistos = set()
+            for caminho in [cookies_gerenciados(url), o.get("cookies_arquivo") or "", *caminhos_cookies_txt()]:
+                if caminho and os.path.isfile(caminho) and caminho not in vistos:
+                    vistos.add(caminho)
+                    estrategias.append((f"cookies ({os.path.basename(caminho)})", {"cookies": {"arquivo": caminho}}))
+            for nav in NAVEGADORES_COOKIES:
+                estrategias.append((f"cookies do {nav}", {"cookies": {"navegador": nav}}))
         for cliente in (["tv"], ["web_safari"], ["android"]):
             estrategias.append((f"cliente {cliente[0]}", {"cookies": {}, "player_client": cliente}))
     elif ("http error 429" in t or "too many requests" in t) and "subtitle" in t:
@@ -1504,7 +1540,9 @@ async def baixar_nativo(dl_id: str, ctl: Controle, extrator, url: str, destino: 
     loop = asyncio.get_running_loop()
     ctl.nativo_tentado = True
     chave, _ = fontes.plataforma(url)
-    cookie = cookie_header_de_arquivo(cookies_gerenciados(url) or o.get("cookies_arquivo") or "", fontes.dominio_raiz(fontes.host_de(url)))
+    cookie = ""
+    if cookies_permitidos(url, o):  # desligados nas configurações: o extrator vai sem login
+        cookie = cookie_header_de_arquivo(cookies_gerenciados(url) or o.get("cookies_arquivo") or "", fontes.dominio_raiz(fontes.host_de(url)))
     kwargs = {}
     if extrator in (nativos.twitter, nativos.reddit, nativos.twitch_clipe):
         kwargs["limite_altura"] = opcoes_ytdlp.altura_maxima(o)

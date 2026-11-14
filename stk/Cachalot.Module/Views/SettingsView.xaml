@@ -254,27 +254,45 @@
         <TextBlock Text="Login e cookies" Style="{StaticResource Section}" />
         <TextBlock Text="Para conteúdo que só aparece logado (privados, membros, idade) e para o YouTube parar de pedir verificação. Os cookies ficam neste PC e cada site só recebe os seus."
                    Style="{StaticResource Hint}" Margin="0,8,0,0" />
-        <StackPanel x:Name="CookieList" Margin="0,6,0,0" />
-        <Grid Style="{StaticResource FieldRow}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="CookieEmpty" Text="Nenhum site com cookies. A extensão envia sozinha; ou importe um cookies.txt (formato Netscape)."
-                       Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0" />
-            <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE8B5;" Content="Importar cookies.txt…" Click="OnImportCookies" VerticalAlignment="Center" />
-        </Grid>
-        <Grid Style="{StaticResource FieldRow}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="200" />
-            </Grid.ColumnDefinitions>
-            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                <TextBlock Text="Ler cookies do navegador" Style="{StaticResource Text.BodyStrong}" />
-                <TextBlock Text="Para sites sem cookies importados. Chrome e Edge recentes costumam bloquear; Firefox funciona." Style="{StaticResource Hint}" />
+        <CheckBox x:Name="CookiesSwitch" Style="{StaticResource Toggle}" Checked="OnCookiesSwitch" Unchecked="OnCookiesSwitch">
+            <StackPanel>
+                <TextBlock Text="Usar cookies nos downloads" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock x:Name="CookiesStatus" Style="{StaticResource Hint}" />
             </StackPanel>
-            <ComboBox x:Name="BrowserBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnBrowserChanged" AutomationProperties.Name="Navegador" />
-        </Grid>
+        </CheckBox>
+        <StackPanel x:Name="CookiesPanel">
+            <StackPanel x:Name="CookieList" Margin="0,6,0,0" />
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="CookieEmpty" Text="Nenhum site com cookies. A extensão envia sozinha; ou importe um cookies.txt (formato Netscape)."
+                           Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE8B5;" Content="Importar cookies.txt…" Click="OnImportCookies" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock Text="Nunca usar cookies em" Style="{StaticResource Text.BodyStrong}" Margin="0,18,0,0" />
+            <TextBlock Text="Para um site que ainda não tem cookies salvos. O que a extensão mandar dele é descartado." Style="{StaticResource Hint}" />
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CookieSiteBox" ui:Ui.Placeholder="Site, ex.: instagram.com" KeyDown="OnCookieSiteKeyDown" AutomationProperties.Name="Site sem cookies" />
+                <Button Grid.Column="1" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE710;" Content="Adicionar" Margin="8,0,0,0" Click="OnAddCookieSite" />
+            </Grid>
+            <Grid Style="{StaticResource FieldRow}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="200" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Ler cookies do navegador" Style="{StaticResource Text.BodyStrong}" />
+                    <TextBlock Text="Para sites sem cookies importados. Chrome e Edge recentes costumam bloquear; Firefox funciona." Style="{StaticResource Hint}" />
+                </StackPanel>
+                <ComboBox x:Name="BrowserBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnBrowserChanged" AutomationProperties.Name="Navegador" />
+            </Grid>
+        </StackPanel>
 
         <!-- Rules -->
         <TextBlock Text="Regras" Style="{StaticResource Section}" />

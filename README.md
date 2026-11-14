@@ -86,12 +86,12 @@ Ficam na aba **Configurações** do Cachalot no SwissTechKnife:
 - **Playlists:** inteira ou com limite, em pasta própria.
 - **Extras:** metadados e capa embutidos, `.nfo` para Kodi/Jellyfin, capítulos, lives desde o começo, legendas, SponsorBlock.
 - **Rede:** downloads simultâneos, conexões por download, novas tentativas, limite de velocidade, proxy.
-- **Login nos sites:** cookies por site (pela extensão ou um `cookies.txt`) ou do seu navegador.
+- **Login nos sites:** cookies por site (pela extensão ou um `cookies.txt`) ou do seu navegador; dá para desligar os cookies de vez ou só em alguns sites.
 - **Sistema:** não deixar o PC dormir durante downloads, atalho global, link copiado.
 
 ## Extensão do navegador
 
-A extensão para Chrome, Edge e Brave manda para o Cachalot a página atual, um link (botão direito) ou um vídeo detectado na página, com os cookies do site para conteúdo que exige login. Pelo popup você acompanha o download e, quando termina, abre a pasta do arquivo.
+A extensão para Chrome, Edge e Brave manda para o Cachalot a página atual, um link (botão direito) ou um vídeo detectado na página, com os cookies do site para conteúdo que exige login (se eles são usados é escolha do Cachalot, em **Configurações** → **Login e cookies**). Pelo popup você acompanha o download e, quando termina, abre a pasta do arquivo.
 
 Para instalar: **Cachalot** → **Configurações** → **Extensão do navegador** → **Instalar no Chrome…**. Detalhes em [extension/README.md](extension/README.md).
 
@@ -99,7 +99,7 @@ Para instalar: **Cachalot** → **Configurações** → **Extensão do navegador
 
 - Tudo roda no seu computador. O Cachalot só fala com os sites de onde você pede para baixar.
 - A extensão conversa apenas com o Cachalot no próprio PC (`127.0.0.1`), e só depois de pareada com o código das configurações.
-- Os cookies que você envia ficam guardados localmente e são usados só nos sites deles.
+- Os cookies que você envia ficam guardados localmente e são usados só nos sites deles. Em **Login e cookies** você desliga todos ou os de um site: aí eles nem são guardados, e nenhum download desse site usa cookies (nem os importados, nem os do navegador).
 
 ## Bom saber
 

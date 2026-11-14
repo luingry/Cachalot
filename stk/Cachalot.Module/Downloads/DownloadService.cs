@@ -98,6 +98,19 @@ namespace Cachalot.Module.Downloads
 
         public CookieStore Cookies { get; }
 
+        /// <summary>
+        /// Saves the cookies the extension sent with a page on <paramref name="host"/>, unless cookies are off (globally
+        /// or for that site in Configurações › Login e cookies). Returns how many were saved (0 when skipped).
+        /// </summary>
+        public int SaveBrowserCookies(string host, IEnumerable<Dictionary<string, object>> cookies)
+        {
+            if (cookies == null || !Prefs.CookiesAllowedFor(host))
+            {
+                return 0;
+            }
+            return Cookies.SaveFromBrowser(host, cookies);
+        }
+
         public string DefaultFolder { get; }
 
         public ObservableCollection<DownloadItem> Active { get; } = new ObservableCollection<DownloadItem>();

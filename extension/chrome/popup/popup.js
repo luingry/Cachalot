@@ -21,7 +21,6 @@ import {
 } from "../src/lib/preview.js";
 import { PREVIEW_RULE_ID, previewHeaderRule } from "../src/lib/previewrule.js";
 import { anyActive, awaitingListing, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
-import { cookiesEnabledFor, setCookiesEnabledFor } from "../src/lib/settings.js";
 import { attachMse, dashPlan, parseHlsMaster, pickVariant } from "../src/lib/streams.js";
 import { WAVE_ICON, createTransientView, icon } from "./transient.js";
 
@@ -111,7 +110,6 @@ function updateButtons() {
   for (const b of document.querySelectorAll(".media-row .btn, .transient-open")) {
     if (!b.classList.contains("is-busy") && !b.classList.contains("is-done")) b.disabled = !enabled;
   }
-  $("syncCookies").disabled = !(enabled && $("cookieSwitch").checked);
   $("showCachalot").disabled = state.connection !== "paired";
 }
 
@@ -132,6 +130,10 @@ async function showCachalot(button) {
 }
 
 function setConnection(next, info = {}) {
+  const failing = (s) => s === "closed" || s === "unpaired";
+  // the status block shows only when something is wrong: connected, it goes away; while checking again it stays
+  // only if it was already showing a failure (no flash on every open)
+  $("status").hidden = next === "paired" || (next === "checking" && !failing(state.connection));
   state.connection = next;
   $("status").dataset.state = next;
   $("statusMeta").textContent = "";
@@ -280,7 +282,7 @@ function showPageFeedback(ok, text) {
 async function sendPage(mode, button) {
   if (!state.tab || cancelFromButton(button)) return;
   setBusy(button, true, "Enviando");
-  const res = await message("sendPage", { tabId: state.tab.id, mode, cookies: $("cookieSwitch").checked });
+  const res = await message("sendPage", { tabId: state.tab.id, mode });
   setBusy(button, false);
   // Success needs no message: the "Baixar" button itself turns into "✓ Na fila" and follows the download.
   if (res.ok) {
@@ -1189,11 +1191,10 @@ function rowTitle(row) {
 
 /** What Cachalot needs to fetch the row's audio: the page, a link the page shows, or a sniffed media (by id). */
 function transientRequest(row) {
-  const cookies = undefined; // the background applies the site's "Enviar cookies" switch, as stored
   const tabId = state.tab.id;
-  if (row.kind === "page") return { tabId, url: state.tab.url, title: "", cookies }; // Cachalot finds the real title
-  if (row.kind === "youtube" || row.kind === "track") return { tabId, url: row.url, title: rowTitle(row), cookies };
-  return { tabId, id: row.id, title: row.meta?.title ? rowTitle(row) : state.tab.title || "", cookies };
+  if (row.kind === "page") return { tabId, url: state.tab.url, title: "" }; // Cachalot finds the real title
+  if (row.kind === "youtube" || row.kind === "track") return { tabId, url: row.url, title: rowTitle(row) };
+  return { tabId, id: row.id, title: row.meta?.title ? rowTitle(row) : state.tab.title || "" };
 }
 
 function openTransient(row, host) {
@@ -1240,7 +1241,6 @@ async function sendRow(row, li, button) {
   if (cancelFromButton(button)) return;
   li.querySelector(".media-error")?.remove();
   setBusy(button, true, "");
-  const cookies = $("cookieSwitch").checked;
   const res =
     row.kind === "youtube" || row.kind === "track"
       ? await message("sendLink", {
@@ -1248,9 +1248,8 @@ async function sendRow(row, li, button) {
           url: row.url,
           title: row.artist ? `${row.artist} - ${row.name}` : row.name,
           mode: row.kind === "track" ? "audio" : null,
-          cookies,
         })
-      : await message("sendMedia", { tabId: state.tab.id, id: row.id, cookies });
+      : await message("sendMedia", { tabId: state.tab.id, id: row.id });
   setBusy(button, false);
   if (res.ok) {
     state.rowFeedback.delete(row.id);
@@ -1348,60 +1347,6 @@ function toggleSortOrder() {
   chrome.storage.local.set({ [ORDER_KEY]: state.newestFirst ? "newest" : "oldest" }).catch(() => {});
 }
 
-// ---- Cookies -------------------------------------------------------------
-
-function cookieCountText(n) {
-  if (n === 0) return "nenhum cookie";
-  return n === 1 ? "1 cookie" : `${n} cookies`;
-}
-
-async function loadCookies() {
-  const sw = $("cookieSwitch");
-  state.domain = state.sendable ? registrableDomainOfUrl(state.tab.url) : "";
-  if (!state.domain) {
-    sw.checked = false;
-    sw.disabled = true;
-    $("cookieMeta").textContent = "Indisponível nesta página";
-    updateButtons();
-    return;
-  }
-  sw.checked = await cookiesEnabledFor(chrome.storage.local, state.domain);
-  let count = 0;
-  try {
-    count = (await chrome.cookies.getAll({ domain: state.domain })).length;
-  } catch {
-    count = 0;
-  }
-  $("cookieMeta").textContent = `${state.domain} · ${cookieCountText(count)}`;
-  state.cookieCount = count;
-  updateButtons();
-}
-
-async function onCookieToggle() {
-  await setCookiesEnabledFor(chrome.storage.local, state.domain, $("cookieSwitch").checked);
-  updateButtons();
-}
-
-async function syncCookies() {
-  const button = $("syncCookies");
-  button.disabled = true;
-  const meta = $("cookieMeta");
-  const res = await message("syncCookies", { tabId: state.tab.id });
-  if (res.ok) {
-    meta.textContent = `${cookieCountText(res.count)} sincronizados ✓`;
-    meta.style.color = "var(--success)";
-  } else {
-    meta.textContent = describeBridgeError(res);
-    meta.style.color = "var(--danger)";
-    applySendError(res);
-  }
-  setTimeout(() => {
-    meta.style.color = "";
-    meta.textContent = `${state.domain} · ${cookieCountText(state.cookieCount || 0)}`;
-    updateButtons();
-  }, 3000);
-}
-
 // ---- Boot ------------------------------------------------------------------
 
 async function init() {
@@ -1411,8 +1356,6 @@ async function init() {
   $("pairForm").addEventListener("submit", onPairSubmit);
   $("sendPage").addEventListener("click", (e) => sendPage(null, e.currentTarget));
   $("sendAudio").addEventListener("click", (e) => sendPage("audio", e.currentTarget));
-  $("cookieSwitch").addEventListener("change", onCookieToggle);
-  $("syncCookies").addEventListener("click", syncCookies);
   $("sortOrder").addEventListener("click", toggleSortOrder);
 
   await Promise.all([loadSortOrder(), loadSent()]);
@@ -1439,7 +1382,7 @@ async function init() {
       if (area === "session" && key in changes) loadMedia();
     });
   }
-  await Promise.all([loadMedia(), loadCookies(), refreshStatus()]);
+  await Promise.all([loadMedia(), refreshStatus()]);
   document.body.dataset.ready = "1";
 }
 

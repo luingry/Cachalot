@@ -26,7 +26,6 @@ import {
 import { detectPlatform, iconStateFor, isHttpUrl, isMusicPlatform, isPageOnlyPlatform } from "./lib/platforms.js";
 import { PREVIEW_RULE_ID } from "./lib/previewrule.js";
 import { adoptPackagedPairing, recordLoadedBuild, shouldReloadForNewBuild } from "./lib/selfsetup.js";
-import { cookiesEnabledFor } from "./lib/settings.js";
 import { annotateMedia, getTabMedia, handleTabUrlChange, registerSniffer, removeTabMedia } from "./sniffer.js";
 
 const BADGE_COLOR = "#E8743C";
@@ -229,7 +228,7 @@ async function collectCookies(tab) {
 
 async function resolveCookieChoice(tab, explicit) {
   if (typeof explicit === "boolean") return explicit;
-  return cookiesEnabledFor(chrome.storage.local, registrableDomainOfUrl(tab?.url));
+  return true; // whether a site's cookies are used is Cachalot's choice (Configurações › Login e cookies)
 }
 
 /**

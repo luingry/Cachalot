@@ -15,8 +15,8 @@ mais nova).
   qualquer aba onde ela detectou vídeo ou áudio; cinza nas demais. O número no ícone é a
   quantidade de mídias detectadas na aba.
 - **Popup** (clique no ícone):
-  - estado da conexão: *Conectado ao Cachalot*, *Cachalot fechado — abra o
-    SwissTechKnife* ou o campo para colar o código de pareamento;
+  - estado da conexão só quando há problema: *Cachalot fechado — abra o SwissTechKnife* ou o
+    campo para colar o código de pareamento (conectado, nada aparece);
   - botão de janela ao lado da engrenagem: abre o Cachalot no SwissTechKnife, na frente do navegador;
   - cartão da página atual com **Baixar** e **Só áudio**;
   - **Mídias detectadas nesta página**: listas HLS (`.m3u8`), DASH (`.mpd`) e arquivos
@@ -92,7 +92,9 @@ mais nova).
     - As divisórias arrastam com o mouse (grudam no transiente mais próximo; com Alt, livres), inclusive o início e o
       fim; duplo clique cria ou remove uma divisória; clique ouve a seção.
     - Arrastar numa área vazia **seleciona** as seções que cruza (Ctrl/Shift somam, Ctrl+clique liga/desliga uma,
-      Ctrl+A seleciona todas, clique simples limpa).
+      Ctrl+A seleciona todas, clique simples limpa). Com duas ou mais seções seguidas selecionadas aparece, no meio
+      delas, o botão **agrupar**: junta todas numa seção só (fade-in da primeira, fade-out da última); **Ctrl+G** faz o
+      mesmo.
     - Com o ponteiro numa seção aparecem **baixar**, **÷2** (divide em duas partes iguais), **×2** (dobra: junta o que
       vier depois até o dobro do tamanho), **voltar ao tamanho original** (desfaz o que mudou nas divisórias dela) e
       **desativar**. Sobre uma seleção, todos valem para todas as seções selecionadas; baixar uma seleção
@@ -117,8 +119,6 @@ mais nova).
       só. Duplo clique na bandeira volta ao começo; Ctrl+Z desfaz.
     - **Ctrl+Z** desfaz e **Ctrl+Shift+Z** / **Ctrl+Y** refaz as edições (divisórias, junções, fades, seções
       desativadas, resets). As edições ficam guardadas na sessão do navegador e o modo volta aberto se o popup fechar;
-  - chave **Enviar cookies deste site** (ligada por padrão, lembrada por site) e o atalho
-    **Sincronizar**, que entrega agora os cookies do site ao Cachalot.
 - **Menu do botão direito**: *Baixar com o Cachalot* (página, link — inclusive `magnet:` —,
   vídeo, áudio, imagem, quadro) e *Baixar só o áudio com o Cachalot* (página, link, vídeo,
   áudio). O ícone mostra ✓ ou ! por 2 segundos com o resultado.
@@ -181,9 +181,10 @@ que funcionou. Nas configurações dá para fixar uma porta.
 
 - Tudo vai **só para `http://127.0.0.1`** (o Cachalot no seu computador). A extensão não
   fala com nenhum servidor na internet, não tem telemetria e não guarda histórico.
-- Cookies só são enviados quando a chave **Enviar cookies deste site** está ligada, e só os
-  do site da página (por exemplo, em `www.youtube.com` vão os cookies de `youtube.com` e
-  subdomínios — nunca os de outros sites). Eles servem para baixar vídeos que exigem login.
+- Junto de cada envio vão só os cookies do site da página (por exemplo, em `www.youtube.com` vão
+  os de `youtube.com` e subdomínios — nunca os de outros sites); eles servem para baixar vídeos
+  que exigem login. Se são usados ou não é escolha do Cachalot: em **Configurações › Login e
+  cookies** dá para desligar os cookies de todos os sites ou só de alguns, e aí ele os descarta.
 - Para as mídias detectadas, são repassados ao Cachalot apenas os cabeçalhos `Referer`,
   `Origin` e `User-Agent` que o navegador usou, para que o download funcione como no site.
 - A lista de mídias detectadas fica na memória da sessão do navegador e some quando a aba

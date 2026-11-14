@@ -2,13 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MENU_AUDIO, MENU_DOWNLOAD, buildDownloadPayload, contextMenuMode, contextMenuTarget } from "../src/lib/payload.js";
 import { createBadgeFeedback } from "../src/lib/feedback.js";
-import {
-  clearCookieOverrides,
-  cookiesEnabledFor,
-  getCookiesDefault,
-  setCookiesDefault,
-  setCookiesEnabledFor,
-} from "../src/lib/settings.js";
 
 test("buildDownloadPayload follows the bridge contract", () => {
   const body = buildDownloadPayload({
@@ -91,35 +84,4 @@ test("badge feedback shows ✓ / ! and restores after the delay", async () => {
   await fb.show(undefined, true);
   await fb.show(-1, true);
   assert.equal(painted.length, 2, "no tab, no badge");
-});
-
-function memoryStorage(initial = {}) {
-  const data = { ...initial };
-  return {
-    data,
-    async get(keys) {
-      const list = Array.isArray(keys) ? keys : [keys];
-      return Object.fromEntries(list.filter((k) => k in data).map((k) => [k, data[k]]));
-    },
-    async set(obj) {
-      Object.assign(data, obj);
-    },
-  };
-}
-
-test("cookie preference: default ON, per-site override, cleared when equal to default", async () => {
-  const storage = memoryStorage();
-  assert.equal(await getCookiesDefault(storage), true);
-  assert.equal(await cookiesEnabledFor(storage, "youtube.com"), true);
-  await setCookiesEnabledFor(storage, "youtube.com", false);
-  assert.equal(await cookiesEnabledFor(storage, "youtube.com"), false);
-  assert.equal(await cookiesEnabledFor(storage, "vimeo.com"), true);
-  await setCookiesEnabledFor(storage, "youtube.com", true);
-  assert.deepEqual(storage.data.cookieSiteOverrides, {});
-  await setCookiesDefault(storage, false);
-  assert.equal(await cookiesEnabledFor(storage, "vimeo.com"), false);
-  await setCookiesEnabledFor(storage, "vimeo.com", true);
-  assert.equal(await cookiesEnabledFor(storage, "vimeo.com"), true);
-  await clearCookieOverrides(storage);
-  assert.equal(await cookiesEnabledFor(storage, "vimeo.com"), false);
 });
