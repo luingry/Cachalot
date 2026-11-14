@@ -1,6 +1,6 @@
 <#
-    Builds and packages the VDGET module for the SwissTechKnife host (docs/MODULES.md in the host repo):
-      artifacts/vd-get-<ver>.zip     module.json + VdGet.Module.dll at the root, backend/servidor.py + sniffer.py
+    Builds and packages the Cachalot module (id vd-get) for the SwissTechKnife host (docs/MODULES.md in the host repo):
+      artifacts/vd-get-<ver>.zip     module.json + Cachalot.Module.dll at the root, backend/*.py (servidor.py and its engines), extension/chrome
     The SDK dll is never packaged: the host provides it. The version comes from stk/Directory.Build.props
     and is written into module.json. Prints sha256 and size for the host catalog.
       powershell -File stk/scripts/pack.ps1
@@ -12,7 +12,7 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
 $stk = Split-Path -Parent $PSScriptRoot
 $repo = Split-Path -Parent $stk
-$project = Join-Path $stk 'VdGet.Module'
+$project = Join-Path $stk 'Cachalot.Module'
 [xml]$props = Get-Content (Join-Path $stk 'Directory.Build.props')
 $version = ($props.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
 

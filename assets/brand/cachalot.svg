@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs><linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A9D2F5"/><stop offset="1" stop-color="#5F8FD8"/></linearGradient></defs>
+  <g transform="translate(0 22)">
+    <path d="M 58,104 C 34,104 20,118 20,140 L 20,158 C 20,180 36,192 62,192 L 138,192 C 170,192 192,180 206,160 L 214,148 C 222,142 230,134 236,122 C 242,110 244,100 244,92 C 236,100 226,106 216,108 C 220,98 220,88 216,80 C 208,92 200,104 194,118 C 184,108 168,104 150,104 Z" fill="url(#body)"/>
+    <path d="M 24,160 C 46,170 80,174 118,172 C 150,170 176,164 196,154 C 186,176 164,188 138,190 L 62,190 C 40,190 28,180 24,160 Z" fill="#E3F1FF"/>
+    <path d="M 22,166 C 40,170 60,170 82,166" fill="none" stroke="#33507F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 56,146 A 6,6 0 1 0 68,146 A 6,6 0 1 0 56,146 Z" fill="#1C2C48"/>
+    <path d="M 92,18 L 92,80 M 70,60 L 92,84 L 114,60" fill="none" stroke="#FFC861" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 66,92 L 58,84 M 118,92 L 126,84" fill="none" stroke="#FFC861" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

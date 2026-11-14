@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Cachalot",
+  "short_name": "Cachalot",
+  "description": "Envia vídeos e áudios da página para o Cachalot (SwissTechKnife) baixar.",
+  "version": "0.7.0",
+  "minimum_chrome_version": "112",
+  "permissions": ["cookies", "webRequest", "storage", "contextMenus", "scripting", "declarativeNetRequestWithHostAccess"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Cachalot",
+    "default_icon": {
+      "16": "icons/inactive-16.png",
+      "24": "icons/inactive-24.png",
+      "32": "icons/inactive-32.png",
+      "48": "icons/inactive-48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/active-16.png",
+    "24": "icons/active-24.png",
+    "32": "icons/active-32.png",
+    "48": "icons/active-48.png",
+    "128": "icons/active-128.png"
+  },
+  "commands": {
+    "send-page": {
+      "suggested_key": { "default": "Alt+Shift+D" },
+      "description": "Enviar página atual ao Cachalot"
+    }
+  },
+  "options_ui": {
+    "page": "pages/options.html",
+    "open_in_tab": true
+  }
+}

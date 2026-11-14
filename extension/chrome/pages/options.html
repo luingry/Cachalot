@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cachalot — Configurações da extensão</title>
+    <link rel="icon" href="../icons/active-32.png" />
+    <link rel="stylesheet" href="../ui/theme.css" />
+    <link rel="stylesheet" href="options.css" />
+    <script type="module" src="options.js"></script>
+  </head>
+  <body>
+    <main class="options">
+      <header class="hero">
+        <img src="../icons/active-48.png" width="40" height="40" alt="" />
+        <div>
+          <h1>Cachalot</h1>
+          <p class="secondary">Extensão do navegador — envia vídeos e áudios para o Cachalot no SwissTechKnife.</p>
+        </div>
+      </header>
+
+      <section class="card block" aria-labelledby="pairTitle">
+        <h2 id="pairTitle" class="overline">Pareamento</h2>
+        <p class="secondary">
+          No SwissTechKnife, abra o Cachalot → Configurações → <strong>Extensão do navegador</strong>, copie o código de
+          8 caracteres e cole aqui.
+        </p>
+        <form id="pairForm" class="row" autocomplete="off">
+          <input
+            id="code"
+            class="input input-code"
+            type="text"
+            maxlength="16"
+            spellcheck="false"
+            placeholder="XXXX-XXXX"
+            aria-label="Código de pareamento"
+          />
+          <button id="save" class="btn btn-primary" type="submit">Salvar código</button>
+          <button id="test" class="btn btn-secondary" type="button">Testar conexão</button>
+        </form>
+        <p id="result" class="msg" hidden></p>
+      </section>
+
+      <section class="card block" aria-labelledby="portTitle">
+        <h2 id="portTitle" class="overline">Conexão</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="setting-label">Encontrar a porta automaticamente</span>
+            <span class="meta">Procura o Cachalot em 127.0.0.1, portas 47821 a 47830.</span>
+          </div>
+          <label class="switch">
+            <input id="portAuto" type="checkbox" checked />
+            <span class="track"><span class="knob"></span></span>
+          </label>
+        </div>
+        <div id="portRow" class="setting setting-sub" hidden>
+          <label for="port" class="setting-label">Porta fixa</label>
+          <input id="port" class="input port-input" type="number" min="1" max="65535" placeholder="47821" />
+        </div>
+        <p id="portInfo" class="meta port-info"></p>
+      </section>
+
+      <section class="card block" aria-labelledby="cookieTitle">
+        <h2 id="cookieTitle" class="overline">Cookies</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="setting-label">Enviar cookies do site por padrão</span>
+            <span class="meta">
+              Ajuda a baixar vídeos que pedem login. Só os cookies do site da página são enviados, e só para o Cachalot neste
+              computador (127.0.0.1). Dá para mudar por site no popup.
+            </span>
+          </div>
+          <label class="switch">
+            <input id="cookiesDefault" type="checkbox" checked />
+            <span class="track"><span class="knob"></span></span>
+          </label>
+        </div>
+        <div id="overridesRow" class="setting setting-sub" hidden>
+          <span id="overridesText" class="meta"></span>
+          <button id="clearOverrides" class="link-btn" type="button">Esquecer escolhas por site</button>
+        </div>
+      </section>
+
+      <section class="card block" aria-labelledby="shortcutTitle">
+        <h2 id="shortcutTitle" class="overline">Atalho e menu</h2>
+        <p class="secondary">
+          <kbd id="shortcutKeys">Alt+Shift+D</kbd> envia a página atual ao Cachalot. Para mudar, abra
+          <code>chrome://extensions/shortcuts</code>.
+        </p>
+        <p class="secondary">
+          Clique com o botão direito numa página, link ou vídeo e escolha <strong>Baixar com o Cachalot</strong> ou
+          <strong>Baixar só o áudio com o Cachalot</strong>.
+        </p>
+      </section>
+
+      <section class="card block" aria-labelledby="installTitle">
+        <h2 id="installTitle" class="overline">Como instalar</h2>
+        <ol class="steps">
+          <li>Abra <code>chrome://extensions</code> e ligue o <strong>Modo do desenvolvedor</strong> (canto superior direito).</li>
+          <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta <code>extension\chrome</code>.</li>
+          <li>Fixe o ícone do Cachalot na barra (ícone de quebra-cabeça → alfinete).</li>
+          <li>Abra o SwissTechKnife com o Cachalot e cole o código de pareamento acima.</li>
+        </ol>
+      </section>
+
+      <p class="footer meta">Versão <span id="version"></span></p>
+    </main>
+  </body>
+</html>
