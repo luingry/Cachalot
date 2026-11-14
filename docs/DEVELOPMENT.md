@@ -61,6 +61,10 @@ A extensão transforma o cartão de uma mídia na waveform do áudio, cortada no
   (`protection.macs`): escrever neles faz o Chrome descartar/resetar, por isso o usuário liga o modo e carrega a
   pasta; o assistente só acompanha (a cada 1,5 s, relendo apenas arquivos alterados) e a ponte (`LocalBridge.LastPairedContact`)
   confirma na hora quando a extensão chama com o código certo.
+- **Abrir a página de extensões** (`Native/ChromeTab`): o Chrome descarta URLs `chrome://` recebidas pela linha de
+  comando, então `chrome.exe chrome://extensions` só abre uma janela vazia. O módulo acha a janela do Chrome mais
+  recente (classe `Chrome_WidgetWin_1` de um `chrome.exe`), traz para a frente e manda Ctrl+T, o endereço e Enter,
+  conferindo antes de cada tecla que o Chrome continua em primeiro plano. Sem janela, abre o Chrome e espera ela aparecer.
 - **Cópia** (`ExtensionInstaller`): espelha `extension/chrome` do pacote em `<dados>/extensao-chrome` e grava
   `pairing.json` (código da ponte: a extensão se pareia sozinha, `src/lib/selfsetup.js`) e `build.json` (carimbo novo a
   cada cópia). Na partida do módulo, se a pasta existe e o hash do pacote mudou (`Preferences.ExtensionBuild`), copia de

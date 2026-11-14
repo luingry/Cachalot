@@ -1,11 +1,10 @@
 using System;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using SwissTechKnife.Sdk;
+using Cachalot.Module.Native;
 using Cachalot.Module.Views;
 
 namespace Cachalot.Module.Setup
@@ -146,20 +145,19 @@ namespace Cachalot.Module.Setup
             }
         }
 
-        /// <summary>Chrome on its extensions page (in the profile it opens by default) and Explorer with the folder selected.</summary>
-        public bool OpenChromeAndFolder(ChromeState state)
+        /// <summary>
+        /// chrome://extensions in a new tab of the Chrome window already open (Chrome is started first when it is not
+        /// running). False when Chrome could not be reached: the dialog then asks the user to open the page.
+        /// </summary>
+        public Task<bool> OpenExtensionsPageAsync(ChromeState state)
         {
-            bool opened = OpenChrome(state);
-            // After Chrome, so Explorer ends up in front with the folder ready to drag.
-            Start("explorer.exe", "/select,\"" + Folder + "\"");
-            return opened;
-        }
-
-        public bool OpenChrome(ChromeState state)
-        {
-            string profile = state?.LastProfile;
-            string arguments = (string.IsNullOrEmpty(profile) ? string.Empty : "--profile-directory=\"" + profile + "\" ") + "chrome://extensions";
-            return Start(state?.Executable ?? "chrome.exe", arguments);
+            string executable = state?.Executable;
+            return Task.Run(() =>
+            {
+                bool opened = ChromeTab.OpenExtensionsPage(executable);
+                Context.Log.Info(opened ? "Opened chrome://extensions in Chrome." : "Could not open chrome://extensions in Chrome.");
+                return opened;
+            });
         }
 
         public void Notify(string message, NotificationKind kind) => Context.Notify(message, kind);
@@ -248,19 +246,6 @@ namespace Cachalot.Module.Setup
                 }
             };
             timer.Start();
-        }
-
-        private static bool Start(string file, string arguments)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(file, arguments) { UseShellExecute = true });
-                return true;
-            }
-            catch (Exception error) when (error is Win32Exception || error is InvalidOperationException || error is FileNotFoundException)
-            {
-                return false;
-            }
         }
     }
 }

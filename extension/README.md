@@ -115,15 +115,15 @@ Chrome…** abre o mesmo assistente). Ao clicar em **Instalar**, o Cachalot:
 
 - copia a extensão para uma pasta fixa (`%LOCALAPPDATA%\SwissTechKnife\data\vd-get\extensao-chrome`,
   que não muda nas atualizações do módulo), junto com o código de pareamento deste PC;
-- copia o caminho, abre o `chrome://extensions` no perfil que o Chrome usa por padrão e o Explorer com a
-  pasta selecionada;
+- copia o caminho (que também fica no próprio assistente, com um botão de copiar) e abre `chrome://extensions`
+  numa aba nova do Chrome que já está aberto (se o Chrome estiver fechado, ele o abre antes); enquanto você está
+  no Chrome, o assistente fica por cima, com os passos e o caminho à vista;
 - acompanha os arquivos do perfil do Chrome e marca cada passo sozinho: **Modo do desenvolvedor**
   ligado, extensão carregada, extensão pareada.
 
 O que fica com você, porque o Chrome não deixa outro programa fazer (as duas opções são assinadas no
 perfil): ligar o **Modo do desenvolvedor** (canto superior direito de `chrome://extensions`) e clicar em
-**Carregar sem compactação** → colar o caminho (Ctrl+V) → **Selecionar pasta**. Arrastar a pasta do
-Explorer para a página de extensões também funciona. Se o modo já estiver ligado, o assistente avisa e
+**Carregar sem compactação** → colar o caminho (Ctrl+V) → **Selecionar pasta**. Se o modo já estiver ligado, o assistente avisa e
 pula esse passo. No fim, fixe o ícone do Cachalot: ícone de quebra-cabeça → alfinete.
 
 Sem o assistente: ligue o Modo do desenvolvedor, **Carregar sem compactação** e escolha a pasta
