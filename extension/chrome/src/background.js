@@ -1,7 +1,7 @@
 // Cachalot service worker: toolbar state, media sniffer, context menus,
 // keyboard shortcut and every call to the local bridge.
 
-import { createBridgeClient } from "./lib/bridge.js";
+import { STORAGE_KEYS, createBridgeClient } from "./lib/bridge.js";
 import { cookiesForDomain, registrableDomainOfUrl } from "./lib/domain.js";
 import { createBadgeFeedback } from "./lib/feedback.js";
 import {
@@ -25,6 +25,7 @@ import {
 } from "./lib/payload.js";
 import { detectPlatform, iconStateFor, isHttpUrl, isMusicPlatform, isPageOnlyPlatform } from "./lib/platforms.js";
 import { PREVIEW_RULE_ID } from "./lib/previewrule.js";
+import { adoptPackagedPairing, recordLoadedBuild, shouldReloadForNewBuild } from "./lib/selfsetup.js";
 import { cookiesEnabledFor } from "./lib/settings.js";
 import { annotateMedia, getTabMedia, handleTabUrlChange, registerSniffer, removeTabMedia } from "./sniffer.js";
 
@@ -164,6 +165,38 @@ async function recoverState() {
 }
 
 recoverState().catch(() => {});
+
+// ---- Self setup (files written by the Cachalot module) ---------------------
+
+const selfSetup = {
+  fetchFn: (...args) => fetch(...args),
+  storage: chrome.storage.local,
+  getURL: (path) => chrome.runtime.getURL(path),
+  codeKey: STORAGE_KEYS.code,
+};
+
+/** Pairs with the code the module left in the extension folder; the ping tells the module at once. */
+async function pairFromPackage() {
+  if (await adoptPackagedPairing(selfSetup)) await bridge.status();
+}
+
+/** Popup, options page or another extension view open: reloading now would close it under the user. */
+async function extensionViewsOpen() {
+  if (typeof chrome.runtime.getContexts !== "function") return false;
+  const views = await chrome.runtime.getContexts({ contextTypes: ["POPUP", "TAB", "SIDE_PANEL"] });
+  return views.length > 0;
+}
+
+/** The module copied a new version over this one: reload to run it (unpacked extensions do not on their own). */
+async function reloadIfUpdated() {
+  if (await extensionViewsOpen()) return;
+  if (await shouldReloadForNewBuild(selfSetup)) chrome.runtime.reload();
+}
+
+reloadIfUpdated()
+  .catch(() => {})
+  .then(() => pairFromPackage())
+  .catch(() => {});
 
 // ---- Sending to Cachalot -------------------------------------------------
 
@@ -309,6 +342,8 @@ function createMenus() {
 
 chrome.runtime.onInstalled.addListener((details) => {
   createMenus();
+  recordLoadedBuild(selfSetup).catch(() => {});
+  pairFromPackage().catch(() => {});
   if (details.reason === "install") chrome.runtime.openOptionsPage().catch(() => {});
 });
 
@@ -324,7 +359,10 @@ chrome.commands.onCommand.addListener((command, tab) => {
 
 const handlers = {
   async status() {
-    return bridge.status();
+    const state = await bridge.status();
+    // Code rejected or missing: the module may have written a new one next to the extension.
+    if (state.state === "unpaired" && (await adoptPackagedPairing(selfSetup))) return bridge.status();
+    return state;
   },
 
   async pair({ code }) {
@@ -387,6 +425,35 @@ const handlers = {
   async openFolder({ id }) {
     if (!id) return { ok: false, error: "not_found" };
     return bridge.openFolder(id);
+  },
+
+  /**
+   * Transient mode: Cachalot downloads the audio of a row (sniffed media, a link the page shows, or the page
+   * itself) to analyze it. Sent like the download would be: same headers, cookies by the site's switch.
+   */
+  async transientPrepare({ tabId, id = null, url = null, title = "", cookies }) {
+    const tab = await getTab(tabId);
+    if (!tab || !isHttpUrl(tab.url)) return { ok: false, error: "unsupported_page" };
+    let target = url;
+    let headers = null;
+    if (id) {
+      const row = await findMedia(tabId, { id });
+      if (!row) return { ok: false, error: "not_found" };
+      target = row.url;
+      headers = row.headers;
+      if (!title && row.meta?.title) title = [row.meta.artist, row.meta.title].filter(Boolean).join(" - ");
+    }
+    if (!isHttpUrl(target)) return { ok: false, error: "not_found" };
+    const withCookies = await resolveCookieChoice(tab, cookies);
+    const cookieList = withCookies ? (await collectCookies(tab)).cookies : null;
+    // no title: Cachalot uses the one its engine finds (YouTube's own, not the tab's "… - YouTube")
+    const payload = buildDownloadPayload({ urls: [target], title, pageUrl: tab.url, headers, cookies: cookieList });
+    return bridge.transient("prepare", { url: target, title: payload.title || "", pageUrl: payload.pageUrl, headers: payload.headers, cookies: payload.cookies });
+  },
+
+  async transient({ op, body }) {
+    if (!["status", "export", "open", "format"].includes(op)) return { ok: false, error: "internal" };
+    return bridge.transient(op, body || {});
   },
 
   async syncCookies({ tabId }) {

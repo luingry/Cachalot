@@ -13,6 +13,7 @@ import direto  # noqa: E402
 import fontes  # noqa: E402
 import nativos  # noqa: E402
 import opcoes_ytdlp  # noqa: E402
+import transientes  # noqa: E402
 
 
 class Fontes(unittest.TestCase):
@@ -136,6 +137,97 @@ class Nativos(unittest.TestCase):
         self.assertEqual(nativos.extrator_para("twitter", "https://x.com/a/status/1")[0], nativos.twitter)
         self.assertEqual(nativos.extrator_para("twitch", "https://www.twitch.tv/canal")[0], None)
         self.assertEqual(nativos.extrator_para("twitch", "https://clips.twitch.tv/Slug")[0], nativos.twitch_clipe)
+
+
+class Transientes(unittest.TestCase):
+    def test_lista_e_segmentos(self):
+        self.assertEqual(transientes.sem_lista_anexada("https://www.youtube.com/watch?v=abc&list=PL1&index=3"),
+                         "https://www.youtube.com/watch?v=abc")
+        segs = transientes.validar_segmentos([{"inicio": -1, "fim": 2}, {"inicio": 5, "fim": 5.001},
+                                              {"inicio": "x"}, {"inicio": 8, "fim": 99, "numero": 7}], 10)
+        self.assertEqual([seg[:3] for seg in segs], [(0.0, 2.0, 1), (8.0, 10.05, 7)])
+        com_fade = transientes.validar_segmentos([{"inicio": 0, "fim": 1, "fade_entrada": 0.8, "fade_saida": 0.5,
+                                                   "curva_entrada": 3}], 10)[0][3]
+        self.assertEqual({k: round(v, 6) for k, v in com_fade.items()},
+                         {"entrada": 0.8, "curva_entrada": 1.0, "saida": 0.2, "curva_saida": 0.0})
+        self.assertEqual(transientes.filtro_fades(1.0, None), "afade=t=in:st=0:d=0.002,afade=t=out:st=0.997000:d=0.003")
+        self.assertIn("aeval=", transientes.filtro_fades(1.0, {"entrada": 0.1, "saida": 0.2}))
+        self.assertEqual(transientes.nome_seguro(" a/b: c? "), "a_b_ c_")
+        self.assertEqual(transientes.chave("https://a"), transientes.chave(" https://a "))
+
+    def test_decodificar_exportar_e_cache(self):
+        import shutil, struct, subprocess, tempfile, wave
+        ff = dependencias.ffmpeg()
+        if not ff:
+            self.skipTest("sem ffmpeg")
+        pasta = tempfile.mkdtemp()
+        try:
+            origem = os.path.join(pasta, "musica.wav")
+            with wave.open(origem, "wb") as w:  # 3 s estéreo 44,1 kHz
+                w.setnchannels(2)
+                w.setsampwidth(2)
+                w.setframerate(44100)
+                w.writeframes(b"".join(struct.pack("<hh", (i * 37) % 2000, 0) for i in range(3 * 44100)))
+            t = transientes.Trabalho("abc", "https://x/1", pasta, "Faixa")
+            t.arquivo = origem
+            t.duracao = transientes.decodificar(ff, origem, t.pcm)
+            self.assertAlmostEqual(t.duracao, 3.0, places=2)
+            self.assertAlmostEqual(os.path.getsize(t.pcm), 3 * transientes.TAXA_ANALISE * 2, delta=200)
+            t.salvar()
+            self.assertEqual(transientes.carregar("abc", "https://x/1", pasta).duracao, t.duracao)
+            self.assertIsNone(transientes.carregar("abc", "https://x/2", pasta))
+            self.assertEqual(transientes.achar_audio(pasta), origem)
+
+            destino = os.path.join(pasta, "saida")
+            caminho, arquivos = transientes.exportar(ff, origem, [(0.5, 1.0, 1), (1.0, 2.5, 2)], destino, "Faixa: X", True)
+            self.assertEqual(os.path.basename(caminho), "Faixa_ X - seções")
+            self.assertEqual([os.path.basename(a) for a in arquivos], ["Faixa_ X - 01.wav", "Faixa_ X - 02.wav"])
+            with wave.open(arquivos[1]) as w:
+                self.assertEqual((w.getnchannels(), w.getframerate()), (2, 44100))
+                self.assertAlmostEqual(w.getnframes() / 44100, 1.5, delta=0.01)
+            caminho2, _ = transientes.exportar(ff, origem, [(0, 1, 1)], destino, "Faixa: X", True)
+            self.assertTrue(caminho2.endswith("seções (2)"))
+            unico, _ = transientes.exportar(ff, origem, [(0, 1, 4)], destino, "Faixa", False)
+            self.assertEqual(unico, os.path.join(destino, "Faixa - 04.wav"))
+            with wave.open(unico) as w:  # rampa de entrada contra estalo: começa do zero
+                primeira = struct.unpack("<hh", w.readframes(1))
+            self.assertEqual(primeira, (0, 0))
+
+            # formatos: flac e mp3 saem com a extensão e o codec certos; qualquer outro vira wav
+            self.assertEqual(transientes.normalizar_formato("MP3"), "mp3")
+            self.assertEqual(transientes.normalizar_formato("ogg"), "wav")
+            self.assertEqual(transientes.normalizar_formato(None), "wav")
+            ffprobe = os.path.join(os.path.dirname(ff), "ffprobe" + (".exe" if os.name == "nt" else ""))
+            for formato, codec in (("flac", "flac"), ("mp3", "mp3")):
+                arq, _ = transientes.exportar(ff, origem, [(0.5, 2.0, 1)], destino, "Fmt", False, formato)
+                self.assertTrue(arq.endswith("Fmt - 01." + formato), arq)
+                if os.path.isfile(ffprobe):
+                    r = subprocess.run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
+                                        "stream=codec_name", "-of", "csv=p=0", arq], capture_output=True, text=True)
+                    self.assertEqual(r.stdout.strip(), codec)
+                else:
+                    self.assertGreater(os.path.getsize(arq), 1000)
+
+            # fades: a 0.5 s fade-in (linear) and a 0.5 s fade-out (aggressive) on a constant signal
+            constante = os.path.join(pasta, "constante.wav")
+            with wave.open(constante, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(8000)
+                w.writeframes(struct.pack("<h", 16000) * (3 * 8000))
+            _, (arq,) = transientes.exportar(ff, constante, [(1.0, 3.0, 1, {"entrada": 0.5, "curva_entrada": 0,
+                                                                           "saida": 0.5, "curva_saida": 1})],
+                                             destino, "Fade", False)
+            with wave.open(arq) as w:
+                amostras = struct.unpack(f"<{w.getnframes()}h", w.readframes(w.getnframes()))
+            self.assertLess(abs(amostras[0]), 200)                       # começa em silêncio
+            self.assertAlmostEqual(amostras[2000] / 16000, 0.5, delta=0.03)  # metade do fade-in linear
+            self.assertAlmostEqual(amostras[8000] / 16000, 1.0, delta=0.01)  # meio da seção, volume cheio
+            # fade-out agressivo (p = 0,25): no meio dele ainda está em 0,5^0,25 ≈ 0,84
+            self.assertAlmostEqual(amostras[16000 - 2000] / 16000, 0.5 ** 0.25, delta=0.03)
+            self.assertLess(abs(amostras[-1]), 200)  # o fade de 3 ms contra estalo zera o fim
+        finally:
+            shutil.rmtree(pasta, ignore_errors=True)
 
 
 if __name__ == "__main__":

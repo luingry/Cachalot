@@ -147,7 +147,7 @@ button[data-dl="fail"] {
 }
 
 .media-row:has(.folder-btn) {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 }
 
 .media-row .folder-btn {
@@ -408,7 +408,7 @@ button[data-dl="fail"] {
 
 .media-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 6px 8px 6px 6px;
@@ -838,4 +838,484 @@ button[data-dl="fail"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- Transient mode ------------------------------------------------------
+   The card turns into the waveform of its audio, cut into sections. The popup
+   widens while it is open so the waveform has room. */
+
+body.has-transient {
+  width: 600px;
+}
+
+.transient-open {
+  color: var(--text-3);
+}
+
+.transient-open:hover:not(:disabled) {
+  color: var(--accent-text);
+}
+
+.transient-open:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.media-row .transient-open {
+  margin: 0 -4px 0 -6px;
+}
+
+.actions.has-transient {
+  grid-template-columns: 1fr auto auto;
+}
+
+.actions.has-transient:has(.folder-btn) {
+  grid-template-columns: auto 1fr auto auto;
+}
+
+.actions .transient-open {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-control);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.media-row.is-transient,
+.page-card.is-transient {
+  display: block;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.media-row.is-transient > :not(.transient),
+.page-card.is-transient > :not(.transient) {
+  display: none !important;
+}
+
+.media-list:has(.is-transient) {
+  max-height: none;
+}
+
+.transient {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fade-in var(--slow) var(--ease);
+}
+
+.tr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.tr-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tr-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tr-all.is-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.tr-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  transition: opacity var(--mid) var(--ease);
+}
+
+.tr-controls.is-waiting {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.tr-sens {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.tr-label {
+  font-weight: 600;
+}
+
+.tr-sens input {
+  width: 96px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tr-sens-value {
+  min-width: 2.2ch;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-grid {
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.tr-grid-btn {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.tr-grid-btn:hover {
+  background: var(--input-hover);
+}
+
+.tr-grid-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #1a0f08;
+}
+
+.tr-info {
+  margin-left: auto;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-wave {
+  position: relative;
+  height: 156px;
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.tr-canvas {
+  display: block;
+}
+
+.tr-tools {
+  position: absolute;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(20, 20, 19, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  animation: pop-fade var(--mid) var(--ease);
+}
+
+.tr-tool {
+  width: 26px;
+  height: 26px;
+  color: var(--text);
+}
+
+.tr-tool:hover {
+  background: var(--surface-3);
+  color: var(--accent-text);
+}
+
+.tr-tip {
+  position: absolute;
+  top: 1px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #1a0f08;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.tr-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 24px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: center;
+}
+
+.tr-overlay.is-error {
+  color: var(--danger);
+}
+
+.tr-progress {
+  width: 60%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.tr-progress-fill {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 300ms var(--ease);
+}
+
+.tr-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.tr-foot-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-foot-text.is-ok {
+  color: var(--success);
+}
+
+.tr-foot-text.is-error {
+  color: var(--danger);
+}
+
+.tr-foot-folder {
+  width: 24px;
+  height: 24px;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.tr-foot-folder:hover {
+  background: rgba(99, 194, 143, 0.26);
+}
+
+.tr-tool:disabled,
+.tr-head-tools .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+
+.tr-controls {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.tr-sens input {
+  width: 80px;
+}
+
+.tr-grid-btn {
+  padding: 0 6px;
+}
+
+.tr-loop {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tr-loop input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tr-merge {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(20, 20, 19, 0.92);
+  color: var(--accent-text);
+  box-shadow: 0 0 0 1px rgba(232, 116, 60, 0.45), 0 3px 10px rgba(0, 0, 0, 0.45);
+  animation: pop-fade var(--mid) var(--ease);
+}
+
+.tr-merge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tr-merge:hover {
+  background: var(--accent);
+  color: #1a0f08;
+}
+
+.tr-play {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.tr-play:hover:not(:disabled) {
+  background: rgba(232, 116, 60, 0.26);
+}
+
+.tr-play.is-playing {
+  background: var(--accent);
+  color: #1a0f08;
+}
+
+.tr-play svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tr-play:not(.is-playing) svg path {
+  fill: currentColor;
+}
+
+.tr-grids {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tr-grid-bars {
+  align-self: flex-start;
+}
+
+.tr-overview {
+  position: relative;
+  height: 39px; /* a quarter of the waveform above */
+  margin-top: -2px;
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.tr-overview-canvas {
+  display: block;
+  cursor: grab;
+}
+
+.tr-tool.tr-text {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* "Salvar como": MP3 / WAV / FLAC, asked when a section is downloaded (unless remembered) */
+.tr-format {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: pop-fade var(--mid) var(--ease);
+}
+
+.tr-format-title {
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tr-format-options {
+  display: flex;
+  gap: 4px;
+}
+
+.tr-format-btn {
+  min-width: 52px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--input);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.tr-format-btn:hover {
+  background: var(--input-hover);
+  color: var(--accent-text);
+}
+
+.tr-format-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tr-format-btn:active {
+  background: var(--accent);
+  color: #1a0f08;
+}
+
+.tr-format-remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tr-format-remember input {
+  margin: 0;
+  accent-color: var(--accent);
 }

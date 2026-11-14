@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -40,6 +41,8 @@ namespace Cachalot.Module.Downloads
         private readonly DispatcherTimer _prefsTimer;
         private readonly PowerRequest _awake = new PowerRequest();
         private TaskCompletionSource<object[]> _channelReply;
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<Dictionary<string, object>>> _transientReplies =
+            new ConcurrentDictionary<string, TaskCompletionSource<Dictionary<string, object>>>();
         private bool _disposed;
 
         public DownloadService(IModuleContext context, Preferences prefs, PreferencesStore prefsStore)
@@ -271,6 +274,66 @@ namespace Cachalot.Module.Downloads
         }
 
         /// <summary>
+        /// Transient mode (browser extension): one request to the backend's "transiente" action (op = preparar, estado,
+        /// exportar, abrir) and its answer. Null when the backend is unavailable or did not answer in time.
+        /// </summary>
+        public async Task<Dictionary<string, object>> TransientAsync(string op, Dictionary<string, object> fields, TimeSpan timeout)
+        {
+            string id = Guid.NewGuid().ToString("N");
+            var reply = new TaskCompletionSource<Dictionary<string, object>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _transientReplies[id] = reply;
+            var message = new Dictionary<string, object>(fields ?? new Dictionary<string, object>())
+            {
+                ["acao"] = "transiente",
+                ["op"] = op,
+                ["pedido"] = id,
+                ["config"] = Prefs.ToBackendConfig(),
+            };
+            try
+            {
+                if (!await Backend.SendAsync(message).ConfigureAwait(false))
+                {
+                    return null;
+                }
+                Task finished = await Task.WhenAny(reply.Task, Task.Delay(timeout)).ConfigureAwait(false);
+                return finished == reply.Task ? reply.Task.Result : null;
+            }
+            finally
+            {
+                _transientReplies.TryRemove(id, out _);
+            }
+        }
+
+        /// <summary>Options of the hidden audio download behind transient mode (headers the page used).</summary>
+        public Dictionary<string, object> TransientOptions(Dictionary<string, object> headers) => JobOptions(Modes.Audio, AudioFormats.Original, headers);
+
+        /// <summary>Explorer on a file (selected) or a folder the transient mode exported, in front of the browser.</summary>
+        public bool Reveal(string path)
+        {
+            try
+            {
+                List<IntPtr> before = ExplorerWindow.Snapshot();
+                if (File.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = false });
+                    ExplorerWindow.BringForward(before, Path.GetFileName(Path.GetDirectoryName(path)), _context.Dispatcher);
+                    return true;
+                }
+                if (Directory.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    ExplorerWindow.BringForward(before, Path.GetFileName(path.TrimEnd('\\', '/')), _context.Dispatcher);
+                    return true;
+                }
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception || error is InvalidOperationException)
+            {
+                _context.Log.Warn("Could not open the folder: " + error.Message);
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Shows the file selected in Explorer, or the destination folder when the file is gone. <paramref name="bringForward"/>:
         /// asked from outside Cachalot (the extension), so the window is brought in front of the app that has the focus.
         /// </summary>
@@ -350,6 +413,10 @@ namespace Cachalot.Module.Downloads
             FlushPreferences();
             SaveNow();
             _channelReply?.TrySetResult(null);
+            foreach (TaskCompletionSource<Dictionary<string, object>> pending in _transientReplies.Values)
+            {
+                pending.TrySetResult(null);
+            }
             Backend.Dispose();
             _awake.Dispose();
         }
@@ -474,6 +541,12 @@ namespace Cachalot.Module.Downloads
                     {
                         Dependencies = stateMap;
                         DependenciesChanged?.Invoke();
+                    }
+                    break;
+                case "transiente":
+                    if (_transientReplies.TryGetValue(Str(message, "pedido"), out TaskCompletionSource<Dictionary<string, object>> pending))
+                    {
+                        pending.TrySetResult(message);
                     }
                     break;
                 case "canais":

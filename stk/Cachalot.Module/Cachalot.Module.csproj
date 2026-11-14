@@ -33,6 +33,7 @@
     <None Include="..\..\torrents.py" Link="backend\torrents.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\dependencias.py" Link="backend\dependencias.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\opcoes_ytdlp.py" Link="backend\opcoes_ytdlp.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\transientes.py" Link="backend\transientes.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\extension\chrome\**\*" Exclude="..\..\extension\chrome\tests\**;..\..\extension\chrome\scripts\**;..\..\extension\chrome\node_modules\**;..\..\extension\chrome\docs\**;..\..\extension\chrome\package*.json"
           Link="extension\chrome\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -216,7 +216,12 @@ def run(args):
     shutil.rmtree(profile, ignore_errors=True)
     checks = Checks()
 
-    ports = [*range(47821, 47831), SITE_PORT, HTTPS_PORT]
+    global BRIDGE_PORT
+    BRIDGE_PORT = args.bridge_port
+    # A bridge port outside 47821–47830 (with --only) lets the test run while Cachalot itself is open: the
+    # extension is pointed at the mock with its port override and never probes the real app.
+    probing = 47821 <= BRIDGE_PORT <= 47830
+    ports = [*(range(47821, 47831) if probing else [BRIDGE_PORT]), SITE_PORT, HTTPS_PORT]
     deadline = time.time() + args.wait_ports
     busy = [port for port in ports if not port_free(port)]
     if busy:
@@ -260,7 +265,7 @@ def run(args):
                 viewport={"width": 1000, "height": 800},
             )
             try:
-                _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page_errors, real_media)
+                _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page_errors, real_media, only=args.only)
             except Exception:
                 traceback.print_exc()
                 checks.check("scenario finished without exceptions", False, "see traceback")
@@ -284,7 +289,7 @@ def run(args):
     return 0 if not failed else 1
 
 
-def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page_errors, real_media=True):
+def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page_errors, real_media=True, only=None):
     c = checks.check
 
     def get_sw():
@@ -397,6 +402,22 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
         popup.goto(url)
         popup.wait_for_selector("body[data-ready='1']", timeout=15000)
         popup.wait_for_function("() => document.getElementById('status').dataset.state !== 'checking'", timeout=15000)
+
+    if only:
+        # Just one part, already paired with the mock (on its own port when Cachalot itself is running).
+        sw_eval("([code, port]) => chrome.storage.local.set({ pairingCode: code, portOverride: port })", [CODE, BRIDGE_PORT])
+        open_popup()
+        c("popup paired with the mock", popup.eval_on_selector("#status", "e => e.dataset.state") == "paired")
+        AUDIO = "Áudio"
+
+        def row_css(label):
+            return f'.media-row:has(.chip:text-is("{label}"))'
+
+        if only == "transient":
+            _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot)
+        relevant = [e for e in page_errors if "favicon" not in e and "ERR_CONNECTION_REFUSED" not in e]
+        c("no errors in extension pages", not relevant, "; ".join(relevant[:5]))
+        return
 
     def status_state():
         return popup.eval_on_selector("#status", "e => e.dataset.state")
@@ -562,7 +583,7 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
 
     # 4. Sending sniffed media rows.
     n = count("/download")
-    popup.locator(row_css(HLS) + " button").click()
+    popup.locator(row_css(HLS) + " button.btn").click()
     req = wait_request("/download", n)
     body = req["body"] if req else {}
     c("HLS row: POST /download received", req is not None)
@@ -607,14 +628,14 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
       not popup.eval_on_selector(folder_css, "b => b.classList.contains('is-error')"))
 
     n = count("/download")
-    popup.locator(row_css(VIDEO) + " button").click()
+    popup.locator(row_css(VIDEO) + " button.btn").click()
     req = wait_request("/download", n)
     body = req["body"] if req else {}
     c("video row: sends clip.webm with mode video", body.get("urls") == [CDN + "/media/clip.webm"] and body.get("mode") == "video", str(body.get("urls")))
     c("video row: replays Referer + User-Agent", body.get("headers", {}).get("Referer", "").startswith(SITE) and body.get("headers", {}).get("User-Agent"), str(body.get("headers")))
 
     n = count("/download")
-    popup.locator(row_css(AUDIO) + " button").click()
+    popup.locator(row_css(AUDIO) + " button.btn").click()
     req = wait_request("/download", n)
     body = req["body"] if req else {}
     c("audio row: mode audio", body.get("urls") == [CDN + "/media/song.mp3"] and body.get("mode") == "audio", str(body))
@@ -652,6 +673,9 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     c("Sincronizar: POST /cookies with the page domain", body.get("domain") == "cachalot-test.com" and len(body.get("cookies", [])) == 2, str(body))
     popup.wait_for_function("() => document.getElementById('cookieMeta').textContent.includes('sincronizados')", timeout=5000)
     c("Sincronizar: inline confirmation", "sincronizados" in text("#cookieMeta"), text("#cookieMeta"))
+
+    # 5b. Transient mode: the waveform icon right of "Baixar" turns the card into its waveform.
+    _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot)
 
     # 6. Context menu and keyboard shortcut (handlers invoked directly: native
     # menus cannot be clicked from automation).
@@ -900,6 +924,470 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     c("no errors in extension pages", not relevant, "; ".join(relevant[:5]))
 
 
+def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
+    popup.set_viewport_size({"width": 600, "height": 760})
+    row = row_css(AUDIO)
+    c("transient: a waveform button right of Baixar on each row",
+      popup.locator(".media-row .transient-open").count() == popup.locator(".media-row").count()
+      and popup.eval_on_selector(row + " .transient-open", "b => b.previousElementSibling?.classList.contains('btn')"))
+    n = count("/transient/prepare")
+    popup.locator(row + " .transient-open").click()
+    req = wait_request("/transient/prepare", n)
+    body = (req or {}).get("body") or {}
+    c("transient: prepare asks Cachalot for the row's media with its headers",
+      body.get("url") == CDN + "/media/song.mp3" and body.get("headers", {}).get("Referer", "").startswith(SITE), str(body))
+    c("transient: prepare carries the site's cookies", len(body.get("cookies", [])) == 2, str(body.get("cookies")))
+    c("transient: the card turns into the view and the popup widens", popup.evaluate(
+        "() => document.body.classList.contains('has-transient') && document.body.offsetWidth >= 590"
+        " && !!document.querySelector('.media-row.is-transient .transient')"))
+    overlay = popup.locator(".tr-overlay-text").inner_text()
+    c("transient: shows the audio being prepared", any(w in overlay for w in ("Preparando", "Baixando", "Carregando", "Detectando")), overlay)
+    popup.wait_for_selector(".transient.is-ready", timeout=20000)
+    view = ".transient"
+
+    def ds(key):
+        return popup.eval_on_selector(view, f"n => n.dataset.{key}")
+
+    def dividers_now():
+        return json.loads(ds("dividers"))
+
+    c("transient: title from Cachalot at the top left", popup.locator(".tr-title").inner_text() == "Loop de teste",
+      popup.locator(".tr-title").inner_text())
+    info = popup.locator(".tr-info").inner_text()
+    c("transient: tempo detected (120 BPM)", any(f"{b} BPM" in info for b in (119, 120, 121)), info)
+    shot(popup, "05a-transient.png")
+
+    def set_sens(value):
+        popup.eval_on_selector(".tr-sens input", "(i, v) => { i.value = String(v); i.dispatchEvent(new Event('input')); }", value)
+        popup.wait_for_timeout(150)
+        return int(ds("sections"))
+
+    def pick_grid(label):
+        popup.locator(f".tr-grid-btn:text-is('{label}')").click()
+        return int(ds("sections"))
+
+    bars = pick_grid("1:1")
+    beats = pick_grid("1:4")
+    set_sens(95)  # the hats on the eighths are faint: only a sensitive detection sees them
+    eighths = pick_grid("1:8")
+    grid32 = pick_grid("1:32")
+    grid64 = pick_grid("1:64")
+    set_sens(50)
+    c("transient: 1:32 and 1:64 are offered and cut at least as finely as 1:8",
+      grid64 >= grid32 >= eighths and popup.locator(".tr-grid-btn").all_inner_texts()
+      == ["1:1", "1:2", "1:4", "1:8", "1:16", "1:32", "1:64", "Auto", "2:1", "4:1", "8:1", "16:1", "32:1"],
+      f"{eighths} {grid32} {grid64}")
+    c("transient: 2:1 … 32:1 sit in a row below the others",
+      popup.locator(".tr-grids > .tr-grid-bars .tr-grid-btn").all_inner_texts() == ["2:1", "4:1", "8:1", "16:1", "32:1"])
+    # 8 bars from 0.37 s: 4:1 cuts at 0.37 (after the intro), 8.37 and 16.37 (the tail) -> 4 sections
+    four = pick_grid("4:1")
+    c("transient: 4:1 makes sections of four bars", four == 4, str(four))
+    auto = pick_grid("Auto")
+    auto_cuts = dividers_now()[1:-1]
+    bar_starts = [0.37 + 2 * k for k in range(8)]
+    c("transient: Auto marks the bars first (every bar starts a section)",
+      all(any(abs(t - b) < 0.01 for t in auto_cuts) for b in bar_starts), str(auto_cuts[:12]))
+    # the loop: 0.37 s of quiet, 8 bars at 120 BPM (2 s each), 1 s of tail -> the grid fills all of it
+    c("transient: 1:1 makes one section per bar (plus intro and tail)", bars == 10, str(bars))
+    c("transient: 1:4 makes one section per beat", beats == 35, str(beats))
+    c("transient: finer grids give more sections", eighths > beats > bars, f"{bars} {beats} {eighths}")
+    c("transient: the chosen grid is pressed", popup.get_attribute(".tr-grid-btn:text-is('Auto')", "aria-pressed") == "true")
+
+    pick_grid("Auto")
+    low, mid, high = set_sens(5), set_sens(50), set_sens(100)
+    c("transient: sensitivity changes the cuts live (weak transients only when sensitive)", low < high and low <= mid <= high,
+      f"{low} {mid} {high}")
+    pick_grid("1:4")
+    set_sens(50)
+
+    canvas = popup.locator(".tr-canvas")
+    box = canvas.bounding_box()
+    duration = float(ds("duration"))
+    y = box["y"] + box["height"] / 2
+
+    def x_of(t):
+        return box["x"] + t / duration * box["width"]
+
+    dividers = dividers_now()
+    # hover the 3rd section: download and disable buttons appear on it
+    mid_t = (dividers[2] + dividers[3]) / 2
+    popup.mouse.move(x_of(mid_t), y)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    c("transient: hovering a section shows download, split, double, reset and disable", popup.locator(".tr-tools .tr-tool").count() == 5)
+    shot(popup, "05b-transient-hover.png")
+    # no format remembered: downloading asks MP3 / WAV / FLAC, with "Lembrar escolha"; Esc gives up
+    n = count("/transient/export")
+    popup.locator(".tr-tools .tr-tool").first.click()
+    popup.wait_for_selector(".tr-format", timeout=3000)
+    c("transient: download asks the format (MP3, WAV, FLAC) with a remember checkbox",
+      popup.locator(".tr-format-btn").all_inner_texts() == ["MP3", "WAV", "FLAC"]
+      and "Lembrar escolha" in popup.locator(".tr-format-remember").inner_text(), popup.locator(".tr-format").inner_text())
+    shot(popup, "05b2-transient-format.png")
+    popup.keyboard.press("Escape")
+    popup.wait_for_timeout(300)
+    c("transient: Esc closes the format popup without saving", popup.locator(".tr-format").count() == 0
+      and count("/transient/export") == n)
+    popup.mouse.move(x_of(mid_t), y + 2)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-tool").first.click()
+    popup.wait_for_selector(".tr-format", timeout=3000)
+    popup.locator(".tr-format-remember input").check()
+    popup.locator(".tr-format-btn:text-is('FLAC')").click()
+    req = wait_request("/transient/export", n)
+    eb = (req or {}).get("body") or {}
+    seg = (eb.get("segments") or [{}])[0]
+    c("transient: download of one section sends just it, numbered by position",
+      eb.get("folder") is False and len(eb.get("segments") or []) == 1 and seg.get("number") == 3
+      and abs(seg.get("start", 0) - dividers[2]) < 1e-3 and abs(seg.get("end", 0) - dividers[3]) < 1e-3, str(eb))
+    c("transient: the chosen format goes with it, remembered when ticked",
+      eb.get("format") == "flac" and eb.get("remember") is True, str({k: eb.get(k) for k in ("format", "remember")}))
+    popup.wait_for_selector(".tr-foot-text.is-ok", timeout=5000)
+    c("transient: confirms the saved file", "Salvo" in popup.locator(".tr-foot-text").inner_text(), popup.locator(".tr-foot-text").inner_text())
+
+    total = int(ds("sections"))
+    popup.mouse.move(x_of(mid_t), y + 3)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-toggle").click()
+    c("transient: disabling a section leaves it out", int(ds("active")) == total - 1, f"{ds('active')} / {total}")
+    c("transient: Baixar todos counts the active ones", popup.locator(".tr-all").inner_text().strip() == f"Baixar {total - 1}",
+      popup.locator(".tr-all").inner_text())
+    n = count("/transient/export")
+    popup.locator(".tr-all").click()
+    req = wait_request("/transient/export", n)
+    eb = (req or {}).get("body") or {}
+    segs = eb.get("segments") or []
+    c("transient: Baixar todos sends every active section to one folder, numbered 1…N",
+      eb.get("folder") is True and len(segs) == total - 1 and [s.get("number") for s in segs] == list(range(1, total))
+      and all(abs(s["start"] - dividers[2]) > 1e-3 for s in segs), f"{len(segs)} segments")
+    c("transient: a remembered format is used without asking again",
+      eb.get("format") == "flac" and not eb.get("remember") and popup.locator(".tr-format").count() == 0, str(eb.get("format")))
+    popup.wait_for_selector(".tr-foot-folder:not([hidden])", timeout=5000)
+    n = count("/transient/open")
+    popup.locator(".tr-foot-folder").click()
+    c("transient: the folder button asks Cachalot to open it", wait_request("/transient/open", n) is not None)
+
+    # the "music starts here" flag in the ruler: dragging it moves bar 1, the grid follows and the intro is one section
+    origin0 = float(ds("origin"))
+    c("transient: the start flag sits on the detected start (0.37 s)", abs(origin0 - 0.37) < 0.01, str(origin0))
+    yf = box["y"] + box["height"] - 6
+    xf = x_of(origin0) + 6
+    popup.mouse.move(xf, yf)
+    popup.keyboard.down("Alt")
+    popup.mouse.down()
+    popup.mouse.move(xf + 15, yf, steps=2)
+    popup.mouse.move(xf + 30, yf, steps=2)
+    popup.mouse.up()
+    popup.keyboard.up("Alt")
+    origin1 = float(ds("origin"))
+    marked = dividers_now()
+    beat_s = 0.5
+    c("transient: dragging the flag moves the start", abs(origin1 - (origin0 + 30 / box["width"] * duration)) < 0.02,
+      f"{origin0:.3f} -> {origin1:.3f}")
+    c("transient: the sections start on the flag (one intro section before it, 1:4 counted from it)",
+      abs(marked[1] - origin1) < 1e-3 and abs(marked[2] - origin1 - beat_s) < 0.1, str(marked[:4]))
+    shot(popup, "05b3-transient-start.png")
+    popup.mouse.dblclick(x_of(origin1) + 6, yf)
+    popup.wait_for_timeout(300)
+    c("transient: a double click on the flag goes back to the detected start",
+      abs(float(ds("origin")) - origin0) < 1e-3 and dividers_now() == dividers, ds("origin"))
+
+    # drag the 5th divider 10 px to the right (Alt: no snapping; the next one is a beat, ~16 px, away)
+    # (grabbed above the middle: the middle of a divider holds its merge button)
+    d_index = 4
+    x0 = x_of(dividers[d_index])
+    yd = box["y"] + 40
+    popup.mouse.move(x0, yd)
+    popup.keyboard.down("Alt")
+    popup.mouse.down()
+    popup.mouse.move(x0 + 5, yd, steps=2)
+    popup.mouse.move(x0 + 10, yd, steps=2)
+    popup.mouse.up()
+    popup.keyboard.up("Alt")
+    moved = dividers_now()
+    expected = dividers[d_index] + 10 / box["width"] * duration
+    c("transient: a divider drags to where the mouse leaves it", abs(moved[d_index] - expected) < 0.05,
+      f"{dividers[d_index]:.3f} -> {moved[d_index]:.3f} (expected {expected:.3f})")
+    before = len(moved)
+    gap_t = (moved[6] + moved[7]) / 2
+    popup.keyboard.down("Alt")
+    popup.mouse.dblclick(x_of(gap_t), yd)
+    popup.keyboard.up("Alt")
+    c("transient: a double click adds a divider", len(dividers_now()) == before + 1, str(len(dividers_now())))
+    popup.mouse.dblclick(x_of(gap_t), yd)
+    c("transient: a double click on a divider removes it", len(dividers_now()) == before, str(len(dividers_now())))
+
+    # reset: the dragged section goes back to its detected size; Ctrl+Z / Ctrl+Shift+Z walk the edits
+    # section 4 (its end is the dragged divider; section 5 is only ~6 px wide now)
+    popup.mouse.move(x_of((moved[d_index - 1] + moved[d_index]) / 2), y)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    reset_btn = popup.locator(".tr-tools .tr-reset")
+    c("transient: hover shows reset between download and disable",
+      popup.eval_on_selector(".tr-tools", "t => [...t.children].map(b => b.classList.contains('tr-reset')).join()") == "false,false,false,true,false"
+      and reset_btn.is_enabled())
+    reset_btn.click()
+    c("transient: reset puts the section back at its original size",
+      abs(dividers_now()[d_index] - dividers[d_index]) < 1e-3, f"{dividers_now()[d_index]} vs {dividers[d_index]}")
+    popup.keyboard.press("Control+z")
+    c("transient: Ctrl+Z undoes the reset", abs(dividers_now()[d_index] - moved[d_index]) < 1e-3, str(dividers_now()[d_index]))
+    popup.keyboard.press("Control+Shift+z")
+    c("transient: Ctrl+Shift+Z redoes it", abs(dividers_now()[d_index] - dividers[d_index]) < 1e-3, str(dividers_now()[d_index]))
+    popup.keyboard.press("Control+z")
+    popup.keyboard.press("Control+z")
+    c("transient: Ctrl+Z goes further back (the double-click edits)", len(dividers_now()) == before + 1, str(len(dividers_now())))
+    popup.keyboard.press("Control+Shift+z")
+    popup.keyboard.press("Control+Shift+z")
+    c("transient: …and redo comes back to the latest state", abs(dividers_now()[d_index] - dividers[d_index]) < 1e-3
+      and len(dividers_now()) == before)
+    popup.keyboard.press("Control+z")  # keep the drag for the reopen check below
+    moved = dividers_now()
+
+    # ÷2 and ×2 in the hover buttons (on bars: wide enough to hover each half)
+    pick_grid("1:1")
+    bars_div = dividers_now()
+    sections_before = int(ds("sections"))
+    s_a, s_b = bars_div[3], bars_div[4]
+    popup.mouse.move(x_of((s_a + s_b) / 2 - 0.3), y + 20)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-split").click()
+    halves = dividers_now()
+    c("transient: split cuts the section in two equal halves", int(ds("sections")) == sections_before + 1
+      and any(abs(t - (s_a + s_b) / 2) < 1e-3 for t in halves), str(len(halves)))
+    popup.mouse.move(x_of(s_a + (s_b - s_a) / 4), y + 20)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-double").click()
+    c("transient: x2 doubles it back", int(ds("sections")) == sections_before
+      and not any(abs(t - (s_a + s_b) / 2) < 1e-3 for t in dividers_now()), ds("sections"))
+    popup.mouse.move(x_of((s_a + s_b) / 2), y + 20)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-double").click()
+    doubled = dividers_now()
+    c("transient: x2 on a bar makes it two bars long", any(abs(t - (s_a + 2 * (s_b - s_a))) < 0.02 for t in doubled)
+      and not any(abs(t - s_b) < 1e-3 for t in doubled), str([round(t, 2) for t in doubled[:8]]))
+    for _ in range(3):
+        popup.keyboard.press("Control+z")
+    pick_grid("1:4")
+    c("transient: Ctrl+Z undoes them all", dividers_now() == moved, ds("sections"))
+
+    # merge: near a divider a button appears on its middle; it joins the two sections
+    sections_before = int(ds("sections"))
+    xm = x_of(moved[20])
+    popup.mouse.move(xm + 2, y)
+    popup.wait_for_selector(".tr-merge:not([hidden])", timeout=3000)
+    box_m = popup.locator(".tr-merge").bounding_box()
+    c("transient: the merge button sits centered on the divider",
+      abs(box_m["x"] + box_m["width"] / 2 - xm) < 1.5 and abs(box_m["y"] + box_m["height"] / 2 - (box["y"] + 16 + (box["height"] - 31) / 2)) < 1.5,
+      str(box_m))
+    shot(popup, "05g-transient-merge.png")
+    popup.locator(".tr-merge").click()
+    after_merge = dividers_now()
+    c("transient: merge joins the two sections", int(ds("sections")) == sections_before - 1
+      and all(abs(t - moved[20]) > 1e-3 for t in after_merge), ds("sections"))
+    popup.mouse.move(x_of((moved[18] + moved[19]) / 2), y)
+    c("transient: the merge button stays hidden away from dividers", popup.locator(".tr-merge").is_hidden())
+    popup.keyboard.press("Control+z")
+    c("transient: Ctrl+Z splits them again", int(ds("sections")) == sections_before, ds("sections"))
+
+    # drag across sections 9-12 to select them; the hover buttons then act on all of them
+    active_before = int(ds("active"))
+    popup.mouse.move(x_of((moved[8] + moved[9]) / 2), y)
+    popup.mouse.down()
+    popup.mouse.move(x_of((moved[10] + moved[11]) / 2), y, steps=4)
+    popup.mouse.move(x_of((moved[11] + moved[12]) / 2), y, steps=4)
+    popup.mouse.up()
+    c("transient: dragging selects the sections it crosses", ds("selected") == "4", ds("selected"))
+    popup.mouse.move(x_of((moved[9] + moved[10]) / 2), y + 2)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    shot(popup, "05d-transient-selection.png")
+    n = count("/transient/export")
+    popup.locator(".tr-tools .tr-tool").first.click()
+    req = wait_request("/transient/export", n)
+    eb = (req or {}).get("body") or {}
+    segs = eb.get("segments") or []
+    c("transient: download on a selection saves each section as its own file",
+      eb.get("folder") is False and [s.get("number") for s in segs] == [9, 10, 11, 12]
+      and all(abs(s["start"] - moved[s["number"] - 1]) < 1e-3 and abs(s["end"] - moved[s["number"]]) < 1e-3 for s in segs), str(eb))
+    popup.wait_for_selector(".tr-foot-text.is-ok", timeout=5000)
+    c("transient: confirms the files", "4 arquivos" in popup.locator(".tr-foot-text").inner_text(), popup.locator(".tr-foot-text").inner_text())
+    popup.mouse.move(x_of((moved[9] + moved[10]) / 2), y)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    popup.locator(".tr-tools .tr-toggle").click()
+    c("transient: disable on a selection disables all of it", int(ds("active")) == active_before - 4, f"{ds('active')} vs {active_before}")
+    popup.keyboard.press("Control+z")
+    c("transient: …and Ctrl+Z brings them back", int(ds("active")) == active_before, ds("active"))
+    popup.mouse.click(x_of((moved[14] + moved[15]) / 2), y)
+    c("transient: a plain click clears the selection", ds("selected") == "0", ds("selected"))
+
+    # Loop: the clicked section keeps playing round; off, it stops at its end
+    popup.wait_for_timeout(300)
+    if ds("playing"):
+        popup.mouse.click(x_of((moved[14] + moved[15]) / 2), y)  # the click above started it: stop
+        popup.wait_for_timeout(400)
+    c("transient: Loop checkbox next to the other controls", popup.locator(".tr-controls .tr-loop input[type=checkbox]").count() == 1)
+    popup.locator(".tr-loop").click()
+    popup.mouse.click(x_of((moved[14] + moved[15]) / 2), y)
+    popup.wait_for_timeout(400)
+    section_len = moved[15] - moved[14]
+    popup.wait_for_timeout(int(section_len * 3000))
+    c("transient: with Loop on the section keeps playing past its end", ds("playing") == "loop", str(ds("playing")))
+    # resizing the looping section: the loop takes the new end at once (the end divider dragged 5 px left)
+    xe = x_of(moved[15])
+    popup.mouse.move(xe, yd)
+    popup.keyboard.down("Alt")
+    popup.mouse.down()
+    popup.mouse.move(xe - 3, yd, steps=2)
+    popup.mouse.move(xe - 5, yd, steps=2)
+    popup.mouse.up()
+    popup.keyboard.up("Alt")
+    new_end = dividers_now()[15]
+    pr = [float(x) for x in (ds("playRange") or "0,0").split(",")]
+    c("transient: the loop follows the section's new size exactly",
+      ds("playing") == "loop" and abs(pr[0] - moved[14]) < 1e-3 and abs(pr[1] - new_end) < 1e-3 and new_end < moved[15] - 0.05,
+      f"{pr} vs {moved[14]:.4f}-{new_end:.4f}")
+    popup.keyboard.press("Control+z")
+    pr = [float(x) for x in (ds("playRange") or "0,0").split(",")]
+    c("transient: and Ctrl+Z gives the loop its old end back", abs(pr[1] - moved[15]) < 1e-3, str(pr))
+    popup.locator(".tr-loop").click()
+    popup.wait_for_timeout(int(section_len * 1000) + 500)
+    c("transient: turning Loop off lets it end", not ds("playing"), str(ds("playing")))
+    # the play / pause button, left of the title
+    c("transient: play button left of the title", popup.eval_on_selector(".tr-head", "h => h.firstElementChild.classList.contains('tr-play')"))
+    popup.locator(".tr-play").click()
+    popup.wait_for_timeout(500)
+    c("transient: play plays the song and turns into pause", ds("playing") == "once" and ds("playRange").startswith("0,")
+      and "Pausar" in popup.get_attribute(".tr-play", "title"), f"{ds('playing')} {ds('playRange')}")
+    popup.locator(".tr-play").click()
+    paused_at = float(ds("paused") or 0)
+    c("transient: pause stops and keeps the place", not ds("playing") and paused_at > 0.3
+      and "Continuar" in popup.get_attribute(".tr-play", "title"), f"{ds('playing')} at {paused_at}")
+    popup.wait_for_timeout(300)
+    popup.locator(".tr-play").click()
+    popup.wait_for_timeout(200)
+    c("transient: play again goes on from there", ds("playing") == "once" and not ds("paused"), f"{ds('playing')} {ds('paused')}")
+    popup.locator(".tr-play").click()
+
+    c("transient: Loop is remembered", popup.evaluate(
+        "async () => (await chrome.storage.local.get('transientSettings')).transientSettings.loop") is False)
+    popup.mouse.move(x_of(duration / 2), y)
+    popup.mouse.wheel(0, -400)
+    popup.wait_for_timeout(150)
+    c("transient: the scroll wheel zooms the waveform", popup.eval_on_selector(view, "n => n.classList.contains('is-zoomed')"))
+    shot(popup, "05c-transient-zoomed.png")
+
+    # fades: on the hovered section, the ■ at the top edge sets the length, the ● on the curve its shape
+    vs, ve = (float(x) for x in ds("view").split(","))
+
+    def xz(t):
+        return box["x"] + (t - vs) / (ve - vs) * box["width"]
+
+    top = box["y"] + 16  # LANE_TOP
+    bottom = box["y"] + box["height"] - 15  # LANE_BOTTOM
+    inside = [k for k in range(len(moved) - 1) if moved[k] > vs + 0.3 and moved[k + 1] < ve - 0.3 and moved[k + 1] - moved[k] > 0.4]
+    k = inside[len(inside) // 2]
+    s0, s1 = moved[k], moved[k + 1]
+    popup.mouse.move((xz(s0) + xz(s1)) / 2, y)
+    popup.wait_for_timeout(100)
+    shot(popup, "05e-transient-fade-handles.png")
+    popup.mouse.move(xz(s0) + 5, top + 6)
+    popup.mouse.down()
+    popup.mouse.move(xz(s0) + 15, top + 6, steps=3)
+    popup.mouse.move(xz(s0) + 26, top + 6, steps=3)
+    popup.mouse.up()
+    fades = json.loads(ds("fades"))
+    fade = next(iter(fades.values()), {})
+    expected_len = 21 / box["width"] * (ve - vs)
+    c("transient: dragging the square handle at a section's start sets its fade-in length",
+      len(fades) == 1 and abs(fade.get("in", 0) - expected_len) < 0.02 and fade.get("inCurve") == 0, f"{fades} vs {expected_len:.3f}")
+    waveH = bottom - top
+    curve_x = xz(s0 + fade.get("in", 0) / 2)
+    popup.mouse.move(curve_x, bottom - 0.5 * waveH)
+    popup.mouse.down()
+    popup.mouse.move(curve_x, bottom - 0.5 * waveH - 15, steps=3)
+    popup.mouse.move(curve_x, bottom - 0.5 * waveH - 30, steps=3)
+    popup.mouse.up()
+    fade = next(iter(json.loads(ds("fades")).values()), {})
+    c("transient: dragging the curve dot up makes the curve more aggressive", abs(fade.get("inCurve", 0) - 0.5) < 0.05, str(fade))
+    popup.mouse.move(xz(s1) - 5, top + 6)
+    popup.mouse.down()
+    popup.mouse.move(xz(s1) - 20, top + 6, steps=4)
+    popup.mouse.up()
+    fade = next(iter(json.loads(ds("fades")).values()), {})
+    c("transient: the square handle at the end sets the fade-out", fade.get("out", 0) > 0.1, str(fade))
+    shot(popup, "05f-transient-fades.png")
+    popup.mouse.move((xz(s0) + xz(s1)) / 2, bottom - 20)
+    popup.wait_for_selector(".tr-tools:not([hidden])", timeout=3000)
+    n = count("/transient/export")
+    popup.locator(".tr-tools .tr-tool").first.click()
+    req = wait_request("/transient/export", n)
+    seg = (((req or {}).get("body") or {}).get("segments") or [{}])[0]
+    c("transient: the download carries the section's fades",
+      abs(seg.get("fadeIn", 0) - fade["in"]) < 1e-6 and abs(seg.get("fadeInCurve", 0) - fade["inCurve"]) < 1e-6
+      and abs(seg.get("fadeOut", 0) - fade["out"]) < 1e-6, str(seg))
+    popup.keyboard.press("Control+z")
+    fade = next(iter(json.loads(ds("fades")).values()), {})
+    c("transient: Ctrl+Z undoes a fade change", fade.get("out", 1) == 0 and fade.get("in", 0) > 0, str(fade))
+    popup.mouse.dblclick(xz(s0 + fade["in"]), top + 6)
+    c("transient: double click on the square handle removes the fade", json.loads(ds("fades")) == {}, ds("fades"))
+    popup.keyboard.press("Control+z")
+    c("transient: …and Ctrl+Z brings it back", len(json.loads(ds("fades"))) == 1, ds("fades"))
+
+    # the right button drags the waveform sideways
+    popup.mouse.move(box["x"] + box["width"] / 2, y)
+    popup.mouse.down(button="right")
+    popup.mouse.move(box["x"] + box["width"] / 2 - 60, y, steps=4)
+    popup.mouse.move(box["x"] + box["width"] / 2 - 120, y, steps=4)
+    popup.mouse.up(button="right")
+    vs2, ve2 = (float(x) for x in ds("view").split(","))
+    c("transient: dragging with the right button moves the view", vs2 > vs + 0.5 and abs((ve2 - vs2) - (ve - vs)) < 1e-6,
+      f"{vs:.2f}-{ve:.2f} -> {vs2:.2f}-{ve2:.2f}")
+    kept_fades = ds("fades")
+
+    # the overview: the whole song below, a quarter of the height; its window shows and moves the view
+    ov = popup.locator(".tr-overview-canvas").bounding_box()
+    c("transient: overview waveform below, a quarter of the height", ov is not None and abs(ov["height"] - box["height"] / 4) <= 1.5
+      and ov["y"] > box["y"] + box["height"] - 1, str(ov))
+    vs, ve = (float(x) for x in ds("view").split(","))
+    oxs = lambda t: ov["x"] + t / duration * ov["width"]  # noqa: E731
+    mid_win = (oxs(vs) + oxs(ve)) / 2
+    popup.mouse.move(mid_win, ov["y"] + ov["height"] / 2)
+    popup.mouse.down()
+    popup.mouse.move(mid_win + 20, ov["y"] + ov["height"] / 2, steps=3)
+    popup.mouse.move(mid_win + 40, ov["y"] + ov["height"] / 2, steps=3)
+    popup.mouse.up()
+    vs2, ve2 = (float(x) for x in ds("view").split(","))
+    moved_by = 40 / ov["width"] * duration
+    c("transient: dragging the overview window moves the view", abs((vs2 - vs) - moved_by) < 0.05 and abs((ve2 - vs2) - (ve - vs)) < 1e-6,
+      f"{vs:.2f}-{ve:.2f} -> {vs2:.2f}-{ve2:.2f}")
+    popup.mouse.move(oxs(ve2), ov["y"] + ov["height"] / 2)
+    popup.mouse.down()
+    popup.mouse.move(oxs(ve2) + 30, ov["y"] + ov["height"] / 2, steps=4)
+    popup.mouse.up()
+    vs3, ve3 = (float(x) for x in ds("view").split(","))
+    c("transient: dragging the window's edge zooms (wider view)", abs(vs3 - vs2) < 1e-6 and (ve3 - vs3) > (ve2 - vs2) + 0.5,
+      f"{vs2:.2f}-{ve2:.2f} -> {vs3:.2f}-{ve3:.2f}")
+    popup.mouse.click(ov["x"] + 5, ov["y"] + ov["height"] / 2)
+    vs4, ve4 = (float(x) for x in ds("view").split(","))
+    c("transient: a click outside the window brings the view there", vs4 < 0.5, f"{vs4:.2f}-{ve4:.2f}")
+    popup.locator(".tr-play").click()
+    popup.wait_for_timeout(300)
+    shot(popup, "05h-transient-overview.png")
+    popup.locator(".tr-play").click()
+    kept = ds("dividers")
+    popup.wait_for_timeout(400)  # edits are saved 300 ms after the last change
+
+    open_popup()
+    popup.wait_for_selector(".transient.is-ready", timeout=15000)
+    c("transient: reopening the popup brings the view back with its edits",
+      ds("dividers") == kept and int(ds("active")) == int(ds("sections")) - 1 and ds("fades") == kept_fades,
+      f"{ds('dividers')[:80]}…")
+    popup.locator(".tr-close").click()
+    c("transient: closing restores the card and the popup width", popup.evaluate(
+        "() => !document.querySelector('.transient') && !document.body.classList.contains('has-transient')"
+        " && !document.querySelector('.is-transient')"))
+    open_popup()
+    c("transient: once closed it stays closed", popup.locator(".transient").count() == 0)
+    popup.set_viewport_size({"width": 360, "height": 640})
+
+
 def _music(c, ctx, popup, open_popup, ext_id, tab_id_for, items, watch, shot, poll, count, wait_request, pop_state, unhover):
     sc_site = f"http://soundcloud.com:{SITE_PORT}"
     music = watch(ctx.new_page())
@@ -1031,6 +1519,9 @@ def main():
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--ext", help="unpacked extension to test (default: this source tree; e.g. an extracted package zip)")
     parser.add_argument("--wait-ports", type=int, default=0, help="seconds to wait for busy test ports to free up")
+    parser.add_argument("--only", choices=["transient"], help="run just this part (paired straight away)")
+    parser.add_argument("--bridge-port", type=int, default=47821,
+                        help="mock bridge port; outside 47821-47830 (with --only) the test runs beside a running Cachalot")
     args = parser.parse_args()
     sys.exit(run(args))
 

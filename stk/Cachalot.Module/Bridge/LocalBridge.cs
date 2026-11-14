@@ -24,9 +24,22 @@ namespace Cachalot.Module.Bridge
         public List<Dictionary<string, object>> Cookies { get; } = new List<Dictionary<string, object>>();
     }
 
+    /// <summary>An answer of the module to a bridge call: HTTP status and JSON body.</summary>
+    internal sealed class BridgeReply
+    {
+        public BridgeReply(int status, Dictionary<string, object> body)
+        {
+            Status = status;
+            Body = body;
+        }
+
+        public int Status { get; }
+        public Dictionary<string, object> Body { get; }
+    }
+
     /// <summary>
     /// Tiny HTTP server on 127.0.0.1 (47821–47830) for the Chrome extension: <c>GET /ping</c>, <c>GET /downloads</c>,
-    /// <c>POST /download</c>, <c>POST /cookies</c>, <c>POST /open-folder</c>, <c>POST /show</c>, <c>POST /cancel</c>. A raw socket instead of HttpListener so no URL reservation or admin rights are needed.
+    /// <c>POST /download</c>, <c>POST /cookies</c>, <c>POST /open-folder</c>, <c>POST /show</c>, <c>POST /cancel</c> and the transient mode's <c>POST /transient/{prepare,status,pcm,export,open,format}</c>. A raw socket instead of HttpListener so no URL reservation or admin rights are needed.
     /// Every POST needs the pairing code shown in the settings; requests from web pages (http/https origins) are refused.
     /// Idle cost: one pending accept, no polling.
     /// </summary>
@@ -41,6 +54,7 @@ namespace Cachalot.Module.Bridge
         private readonly IModuleLog _log;
         private TcpListener _listener;
         private CancellationTokenSource _stop;
+        private long _lastPairedTicks;
 
         public LocalBridge(Func<string> code, string version, IModuleLog log)
         {
@@ -48,6 +62,9 @@ namespace Cachalot.Module.Bridge
             _version = version;
             _log = log;
         }
+
+        /// <summary>Last request carrying the right pairing code (UTC; MinValue when none yet): the extension is installed and paired.</summary>
+        public DateTime LastPairedContact => new DateTime(Interlocked.Read(ref _lastPairedTicks), DateTimeKind.Utc);
 
         /// <summary>Raised on a pool thread; the handler returns how many links were queued (or throws).</summary>
         public Func<BridgeDownload, Task<int>> DownloadRequested { get; set; }
@@ -65,6 +82,15 @@ namespace Cachalot.Module.Bridge
 
         /// <summary>POST /cancel {"id"}: cancels a queued or running download; false when it is unknown or finished.</summary>
         public Func<string, bool> CancelRequested { get; set; }
+
+        /// <summary>
+        /// POST /transient/{prepare,status,export,open,format}: transient mode (waveform and sections of a song). Gets the operation and
+        /// the JSON body (prepare also carries cookies, headers and the page like /download).
+        /// </summary>
+        public Func<string, Dictionary<string, object>, Task<BridgeReply>> TransientRequested { get; set; }
+
+        /// <summary>POST /transient/pcm {"id"}: the analysis audio (mono PCM s16le, 22 050 Hz); null when it is not ready.</summary>
+        public Func<string, Task<byte[]>> TransientPcmRequested { get; set; }
 
         public int Port { get; private set; }
 
@@ -175,13 +201,17 @@ namespace Cachalot.Module.Bridge
         {
             if (request.Method == "OPTIONS")
             {
-                return new Response(204, null);
+                return new Response(204, (string)null);
             }
             if (IsWebPage(request.Origin))
             {
                 return Json(403, new Dictionary<string, object> { ["error"] = "forbidden" });
             }
             bool paired = Authorized(request);
+            if (paired)
+            {
+                Interlocked.Exchange(ref _lastPairedTicks, DateTime.UtcNow.Ticks);
+            }
             if (request.Path == "/ping" && request.Method == "GET")
             {
                 return Json(200, new Dictionary<string, object> { ["app"] = "cachalot", ["version"] = _version, ["paired"] = paired });
@@ -196,7 +226,8 @@ namespace Cachalot.Module.Bridge
                 List<Dictionary<string, object>> items = DownloadsRequested?.Invoke() ?? new List<Dictionary<string, object>>();
                 return Json(200, new Dictionary<string, object> { ["items"] = items });
             }
-            if (request.Method != "POST" || (request.Path != "/download" && request.Path != "/cookies" && request.Path != "/open-folder" && request.Path != "/show" && request.Path != "/cancel"))
+            bool transient = request.Path.StartsWith("/transient/", StringComparison.Ordinal);
+            if (request.Method != "POST" || (!transient && request.Path != "/download" && request.Path != "/cookies" && request.Path != "/open-folder" && request.Path != "/show" && request.Path != "/cancel"))
             {
                 return Json(404, new Dictionary<string, object> { ["error"] = "not found" });
             }
@@ -216,6 +247,11 @@ namespace Cachalot.Module.Bridge
             if (body == null)
             {
                 return Json(400, new Dictionary<string, object> { ["error"] = "invalid json" });
+            }
+
+            if (transient)
+            {
+                return await TransientAsync(request.Path.Substring("/transient/".Length), body).ConfigureAwait(false);
             }
 
             if (request.Path == "/show")
@@ -284,6 +320,33 @@ namespace Cachalot.Module.Bridge
             return Json(202, new Dictionary<string, object> { ["ok"] = true, ["queued"] = queued });
         }
 
+        private async Task<Response> TransientAsync(string op, Dictionary<string, object> body)
+        {
+            if (op == "pcm")
+            {
+                string id = Str(body, "id");
+                if (id.Length == 0)
+                {
+                    return Json(400, new Dictionary<string, object> { ["error"] = "id is required" });
+                }
+                byte[] pcm = TransientPcmRequested == null ? null : await TransientPcmRequested(id).ConfigureAwait(false);
+                return pcm == null ? Json(404, new Dictionary<string, object> { ["error"] = "not found" }) : new Response(200, pcm);
+            }
+            if (op != "prepare" && op != "status" && op != "export" && op != "open" && op != "format")
+            {
+                return Json(404, new Dictionary<string, object> { ["error"] = "not found" });
+            }
+            if (TransientRequested == null)
+            {
+                return Json(503, new Dictionary<string, object> { ["error"] = "not ready" });
+            }
+            BridgeReply reply = await TransientRequested(op, body).ConfigureAwait(false);
+            return Json(reply.Status, reply.Body ?? new Dictionary<string, object>());
+        }
+
+        /// <summary>Cookies sent with a request (same shape as POST /cookies).</summary>
+        internal static List<Dictionary<string, object>> CookiesOf(Dictionary<string, object> body) => Cookies(body);
+
         private bool Authorized(Request request)
         {
             string header = request.Authorization ?? string.Empty;
@@ -349,8 +412,15 @@ namespace Cachalot.Module.Bridge
                 Json = json;
             }
 
+            public Response(int status, byte[] binary)
+            {
+                Status = status;
+                Binary = binary;
+            }
+
             public int Status { get; }
             public string Json { get; }
+            public byte[] Binary { get; }
         }
 
         private static Response Json(int status, Dictionary<string, object> data) => new Response(status, BackendHost.NewSerializer().Serialize(data));
@@ -430,10 +500,10 @@ namespace Cachalot.Module.Bridge
 
         private static async Task WriteResponseAsync(Stream stream, Request request, Response response)
         {
-            byte[] payload = response.Json == null ? new byte[0] : Encoding.UTF8.GetBytes(response.Json);
+            byte[] payload = response.Binary ?? (response.Json == null ? new byte[0] : Encoding.UTF8.GetBytes(response.Json));
             var head = new StringBuilder();
             head.Append("HTTP/1.1 ").Append(response.Status).Append(' ').Append(Reason(response.Status)).Append("\r\n");
-            head.Append("Content-Type: application/json; charset=utf-8\r\n");
+            head.Append(response.Binary != null ? "Content-Type: application/octet-stream\r\n" : "Content-Type: application/json; charset=utf-8\r\n");
             head.Append("Content-Length: ").Append(payload.Length).Append("\r\n");
             head.Append("Cache-Control: no-store\r\nConnection: close\r\n");
             if (!string.IsNullOrEmpty(request.Origin) && !IsWebPage(request.Origin))
@@ -465,6 +535,8 @@ namespace Cachalot.Module.Bridge
                 case 401: return "Unauthorized";
                 case 403: return "Forbidden";
                 case 404: return "Not Found";
+                case 422: return "Unprocessable Entity";
+                case 500: return "Internal Server Error";
                 case 503: return "Service Unavailable";
                 default: return "Error";
             }

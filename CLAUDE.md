@@ -10,7 +10,9 @@ O Chrome desta máquina **não** carrega a extensão de `extension/chrome`, e si
 powershell -File stk/scripts/sync-extension.ps1
 ```
 
-e avise o usuário para clicar em atualizar a extensão em `chrome://extensions`.
+e avise o usuário. O script grava um `build.json` novo e a extensão se recarrega sozinha na próxima vez que acorda
+(se o popup ou a página de configurações estiver aberta, só depois de fechá-la); se não pegar, é clicar em atualizar
+em `chrome://extensions`.
 
 ## Módulo: instalar no SwissTechKnife depois de mexer
 

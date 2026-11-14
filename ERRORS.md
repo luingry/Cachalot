@@ -5,6 +5,98 @@ Antes de investigar um erro novo, consulte esta lista.
 
 ---
 
+## -22. Ponte: rota nova `/transient/<op>` dá 404 no módulo real, mas passa no e2e da extensão
+
+**Sintoma:** `POST /transient/format` respondia 404 (autenticado) no SwissTechKnife, enquanto o e2e da extensão
+passava inteiro.
+**Causa:** `LocalBridge.TransientAsync` tem uma lista fixa de operações aceitas (`prepare`, `status`, `export`,
+`open`) antes de repassar ao `TransientBridge`; a operação nova entrou só no `switch` do `TransientBridge`. O e2e usa
+`tests/e2e/mock_bridge.mjs`, que não tem essa lista.
+**Solução:** incluir a operação na lista de `LocalBridge` e testar a rota em `stk/Cachalot.Tests/Program.cs` (bloco
+"Transient mode"). Ao criar uma operação da ponte, mexa nos três lugares (`LocalBridge`, `TransientBridge`, mock) e
+confira no módulo instalado com um `POST` real.
+
+---
+
+## -22. Popup "instalar a extensão do Chrome" não apareceu ao desinstalar e reinstalar o módulo
+
+**Sintoma:** desinstalar o Cachalot no SwissTechKnife e instalar de novo não mostrou o popup.
+**Causa (host.log + settings.json reais, lidos via WMI):** (1) a reinstalação veio do catálogo configurado no host,
+`catalog-local\catalog.json`, que ainda lista o 1.1.0 (sem o recurso); (2) desinstalar mantém `data\vd-get`, e o
+`ExtensionOffered=true` gravado quando o popup foi *pulado* (extensão já no Chrome) bloquearia qualquer reinstalação.
+**Solução:** `ExtensionPromptShown` só vira true quando o popup aparece; o pulo (sem Chrome ou extensão já carregada)
+fica em `ExtensionCheckedInstall` = pasta do módulo + data de criação, então reinstalar reavalia. A chave antiga é ignorada.
+**Testar:** o popup só aparece se a extensão **não** estiver no Chrome; remova-a em `chrome://extensions` antes.
+
+---
+
+## -21. Chrome: `developer_mode` "ausente" nas Preferences mesmo com extensão descompactada carregada
+
+**Sintoma:** ao detectar o Modo do desenvolvedor lendo `<perfil>\Preferences`, `extensions.ui.developer_mode`
+não existia, embora o perfil tivesse a extensão do Cachalot carregada sem compactação.
+**Causa:** em perfis sincronizados com conta Google o valor fica em `account_values.extensions.ui.developer_mode`,
+e no Chrome atual ele (e `extensions.settings`) mora em `Secure Preferences`, protegido por MAC
+(`protection.macs.extensions.ui.developer_mode`).
+**Solução:** `ChromeProbe` procura nas duas chaves, nos dois arquivos, do perfil `Local State → profile.last_used`.
+**Evitar:** nunca escrever nesses campos para "ligar" o modo ou registrar a extensão: o MAC não confere e o Chrome
+descarta/reseta. O assistente só lê e orienta o usuário.
+
+---
+
+## -20. Modo transiente: toda seção começava um pouco antes do esperado (e mais no fim da música)
+
+**Sintoma:** os cortes caíam alguns ms (às vezes dezenas) antes do ataque, em todas as seções.
+**Causa:** três somas na mesma direção. (1) `placeOnAttack` voltava a largura da janela de energia (~2 ms) além da
+margem de 2 ms; (2) o corte de grade recuava para *qualquer* golpe até 60 ms antes da linha (ex.: o chimbal na
+semicolcheia anterior); (3) o BPM da autocorrelação errava ~0,3 %, e a grade dependia do rastreamento para compensar.
+**Solução:** o ataque é achado na energia de cada bloco de 0,7 ms (primeiro bloco 4× acima do nível logo antes) e a
+margem caiu para 1 ms; o corte só recua até o golpe *da própria linha* tocado até 30 ms adiantado; o andamento é
+ajustado por mínimos quadrados sobre os golpes fortes, em janelas que crescem (20 s, 40 s, 80 s…), porque ajustar a
+música inteira de uma vez conta golpes do fim no tempo errado. Em músicas sintéticas de 3 min a 96,7/123,4/128/140,3
+BPM o BPM sai exato e cada corte fica 0,8–1,7 ms antes do ataque do começo ao fim (`drift` em `tests/transients.test.mjs`).
+
+---
+
+## -18. Extensão: botão preso em "✓ Na fila" para um item que não está mais no Cachalot
+
+**Sintoma:** o popup mostrava "✓ Na fila" (travado, sem cancelar) numa página já enviada, embora o Cachalot não
+tivesse o item na fila nem no histórico.
+**Causa:** a extensão guarda em `chrome.storage.local.sentUrls` toda URL enviada (até 300) e o popup tratava
+"enviada mas não listada em `GET /downloads`" como "ainda chegando" para sempre. Item removido/limpo no Cachalot
+(ou listado com outra URL) deixava o botão preso, e o popup ainda ficava fazendo polling a cada segundo.
+**Solução:** `sentUrls` já guarda `url -> quando`; o popup só mostra "✓ Na fila" sem item listado por
+`SENT_GRACE_MS` (60 s, `awaitingListing` em `src/lib/progress.js`). Depois disso volta a "Baixar".
+
+---
+
+## -19. Modo transiente: primeiro trecho menor que os outros e compassos deslocados
+
+**Sintoma:** com uma grade (1:1, 1:4, 4:1…) a primeira seção saía mais curta que as demais e todas as divisões
+seguintes ficavam fora do lugar em músicas reais.
+**Causa:** o compasso 1 era escolhido pelo tempo com mais grave (`beatGrid`), que em músicas completas cai muitas vezes
+no 2º, 3º ou 4º tempo ou numa nota de anacruse; a grade começava no meio da música e tudo andava junto. Além disso o
+primeiro quadro da análise era zerado, então uma música que começa com uma batida em 0 s não tinha onset ali.
+**Solução:** o compasso 1 começa no primeiro ataque real da música (`FIRST_HIT_STRENGTH = 0.3`); o quadro 0 entra na
+detecção; uma entrada de menos de 50 ms (`LEAD_IN_S`) junta-se à primeira seção. Teste:
+`bar 1 starts with the music…` em `tests/transients.test.mjs`.
+
+---
+
+## -17. Modo transiente: arrastar uma divisória para perto da vizinha apagava a vizinha
+
+**Sintoma:** no e2e, arrastar uma divisória até encostar na seguinte (a 10 ms) fazia a seção seguinte sumir
+(`33 seções` virava `32`).
+**Causa:** um corte automático a menos de `PIN_SHADOW_S` (30 ms) de uma divisória fixada pelo usuário "dá lugar" a ela
+(serve para não criar seções minúsculas quando a detecção muda), e o arrasto deixava chegar a 10 ms da vizinha.
+**Solução:** `MIN_DRAG_GAP_S = 0.02` (o arrasto para a 20 ms da vizinha) e `PIN_SHADOW_S = 0.015`, sempre menor
+que a folga do arrasto. Ao mexer em um dos dois, mantenha `PIN_SHADOW_S < MIN_DRAG_GAP_S`.
+
+**Relacionado (teste):** com o SwissTechKnife aberto a porta 47821 fica ocupada e o e2e recusa rodar. Para testar
+uma parte ao lado dele: `run_e2e.py --only transient --bridge-port 47951` (a extensão do teste usa a porta fixa da
+ponte simulada e nunca procura o Cachalot real).
+
+---
+
 ## -16. `state.json` do SwissTechKnife "velho" e módulo instalado invisível a partir da sessão do Claude
 
 **Sintoma:** o shell mostrava `vd-get` 1.1.0 no `state.json` (data de outubro) enquanto o SwissTechKnife rodava o

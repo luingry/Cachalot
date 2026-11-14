@@ -32,4 +32,8 @@ if (-not $Direct) {
 & robocopy $source $Target /E /NJH /NJS /NFL /NDL /NP /XD tests scripts node_modules docs /XF 'package*.json' | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)." }
 $global:LASTEXITCODE = 0
-Write-Host "Extension copied to $Target. Reload it in chrome://extensions."
+# A new stamp: the loaded extension notices it on its next worker start and reloads itself (src/lib/selfsetup.js).
+# pairing.json, written by the module, is left alone (no /MIR).
+$stamp = 'dev-' + (Get-Date -Format 'yyyyMMddHHmmss')
+[IO.File]::WriteAllText((Join-Path $Target 'build.json'), "{`"build`":`"$stamp`"}", (New-Object Text.UTF8Encoding $false))
+Write-Host "Extension copied to $Target. It reloads itself within a few seconds of browsing (or click reload in chrome://extensions)."
