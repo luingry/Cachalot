@@ -32,6 +32,7 @@ namespace Cachalot.Module.Views
         private bool _busy;
         private bool _polling;
         private bool _preview;
+        private bool _openFailed;
 
         internal ExtensionSetupWindow(ExtensionSetup setup)
         {
@@ -118,7 +119,9 @@ namespace Cachalot.Module.Views
             bool developer = state.DeveloperMode || ExtensionLoaded;
 
             SetStep(CopyBadge, CopyBadgeText, "1", copied ? Step.Done : _phase == Phase.Offer ? Step.Active : Step.Pending);
-            CopyHint.Text = (copied ? "Pronto: " : "Em ") + _setup.Folder;
+            CopyHint.Text = copied ? "Pronto." : "Para uma pasta que não muda nas atualizações do Cachalot.";
+            PathText.Text = _setup.Folder;
+            PathBox.Visibility = ExtensionLoaded ? Visibility.Collapsed : Visibility.Visible;
 
             SetStep(DevBadge, DevBadgeText, "2", developer ? Step.Done : copied ? Step.Active : Step.Pending);
             DevHint.Text = developer
@@ -130,9 +133,10 @@ namespace Cachalot.Module.Views
             LoadHint.Text = ExtensionLoaded
                 ? (state.InstalledButDisabled ? "Carregada, mas desativada: ligue o Cachalot na página de extensões." : "Carregada no Chrome.")
                 : _phase == Phase.Offer
-                    ? "O Cachalot abre a página de extensões e a pasta, com o caminho já copiado."
-                    : "Clique em “Carregar sem compactação”, cole o caminho com Ctrl+V e clique em “Selecionar pasta”. "
-                      + "Ou arraste a pasta selecionada no Explorer para a página de extensões.";
+                    ? "O Cachalot abre a página de extensões no Chrome que já está aberto. Lá, “Carregar sem compactação” e esta pasta:"
+                    : _openFailed
+                        ? "Abra chrome://extensions no Chrome, clique em “Carregar sem compactação”, cole este caminho (Ctrl+V) e clique em “Selecionar pasta”:"
+                        : "Na página de extensões, clique em “Carregar sem compactação”, cole este caminho (Ctrl+V) e clique em “Selecionar pasta”:";
 
             SetStep(PairBadge, PairBadgeText, "4", Paired ? Step.Done : ExtensionLoaded ? Step.Active : Step.Pending);
             PairHint.Text = Paired
@@ -144,6 +148,8 @@ namespace Cachalot.Module.Views
                         : "Automático: a extensão já leva o código deste PC.";
 
             TitleText.Text = _phase == Phase.Done ? "Extensão do Chrome pronta" : _phase == Phase.Waiting ? "Instalando a extensão do Chrome" : "Instalar a extensão do Chrome?";
+            // While the user works in Chrome, the steps and the path stay in sight (the card can be dragged aside).
+            Topmost = _phase == Phase.Waiting && !_preview;
             RenderStatus(state);
             RenderButtons(state);
         }
@@ -186,7 +192,6 @@ namespace Cachalot.Module.Views
 
         private void RenderButtons(ChromeState state)
         {
-            CopyPathButton.Visibility = _phase == Phase.Waiting ? Visibility.Visible : Visibility.Collapsed;
             PrimaryButton.IsEnabled = !_busy;
             switch (_phase)
             {
@@ -199,7 +204,7 @@ namespace Cachalot.Module.Views
                 case Phase.Waiting:
                     SecondaryButton.Content = "Fechar";
                     SecondaryButton.Visibility = Visibility.Visible;
-                    PrimaryButton.Content = "Abrir o Chrome de novo";
+                    PrimaryButton.Content = "Abrir a página de extensões";
                     Ui.SetIcon(PrimaryButton, "");
                     break;
                 default:
@@ -217,7 +222,7 @@ namespace Cachalot.Module.Views
             {
                 if (_state?.InstalledButDisabled == true)
                 {
-                    _setup.OpenChrome(_state);
+                    await OpenChromeAsync();
                 }
                 else
                 {
@@ -228,7 +233,7 @@ namespace Cachalot.Module.Views
             if (_phase == Phase.Waiting)
             {
                 CopyPath();
-                _setup.OpenChromeAndFolder(_state);
+                await OpenChromeAsync();
                 return;
             }
 
@@ -253,10 +258,9 @@ namespace Cachalot.Module.Views
             {
                 _phase = Phase.Waiting;
                 CopyPath();
-                if (!_setup.OpenChromeAndFolder(_state))
-                {
-                    _setup.Notify("Abra a página de extensões do navegador e carregue a pasta (caminho copiado).", NotificationKind.Info);
-                }
+                Render();
+                await OpenChromeAsync();
+                return;
             }
             Render();
         }
@@ -279,6 +283,22 @@ namespace Cachalot.Module.Views
         {
             CopyPath();
             _setup.Notify("Caminho da extensão copiado.", NotificationKind.Success);
+        }
+
+        /// <summary>The extensions page in the Chrome already open; this window stays where the user can see the steps.</summary>
+        private async System.Threading.Tasks.Task OpenChromeAsync()
+        {
+            PrimaryButton.IsEnabled = false;
+            try
+            {
+                _openFailed = !await _setup.OpenExtensionsPageAsync(_state);
+            }
+            catch (Exception error)
+            {
+                _openFailed = true;
+                _setup.Notify("Não deu para abrir o Chrome: " + error.Message, NotificationKind.Warning);
+            }
+            Render();
         }
 
         private void CopyPath()

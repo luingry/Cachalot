@@ -104,6 +104,19 @@
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="Carregar a extensão" Style="{StaticResource StepTitle}" />
                         <TextBlock x:Name="LoadHint" Style="{StaticResource StepHint}" />
+                        <!-- The folder to paste in Chrome's "Load unpacked" dialog, copied with one click. -->
+                        <Border x:Name="PathBox" Margin="0,8,0,0" Padding="12,4,4,4" CornerRadius="{StaticResource Radius.Md}" Background="{StaticResource Brush.Surface3}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="PathText" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="{StaticResource Brush.Text.Primary}"
+                                           TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <Button x:Name="CopyPathButton" Grid.Column="1" Style="{StaticResource Button.Icon.Sm}" ui:Ui.Icon="&#xE8C8;"
+                                        ToolTip="Copiar o caminho" AutomationProperties.Name="Copiar o caminho" VerticalAlignment="Center" Click="OnCopyPath" />
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </Grid>
                 <Grid Style="{StaticResource StepRow}">
@@ -127,8 +140,6 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Button x:Name="CopyPathButton" Style="{StaticResource Button.Ghost}" ui:Ui.Icon="&#xE8C8;" Content="Copiar o caminho"
-                        Click="OnCopyPath" Visibility="Collapsed" />
                 <Button x:Name="SecondaryButton" Grid.Column="2" Style="{StaticResource Button.Secondary}" Content="Agora não" Click="OnClose" Margin="0,0,8,0" />
                 <Button x:Name="PrimaryButton" Grid.Column="3" Style="{StaticResource Button.Primary}" ui:Ui.Icon="&#xE896;" Content="Instalar" Click="OnPrimary" IsDefault="True" />
             </Grid>

@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,13 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.1.1",
+      "notes": [
+        "Chrome extension setup: opens the extensions page in a new tab of the Chrome you already have open, instead of an empty new window.",
+        "The extension folder's path is shown in the setup window with a copy button, and the window stays in sight while you work in Chrome."
+      ]
+    },
     {
       "version": "2.1.0",
       "notes": [

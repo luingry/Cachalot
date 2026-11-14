@@ -5,6 +5,29 @@ Antes de investigar um erro novo, consulte esta lista.
 
 ---
 
+## -25. "Instalar" no assistente abria uma janela nova e vazia do Chrome em vez da página de extensões
+
+**Sintoma:** com o Chrome aberto, o assistente da extensão abria outra janela (página nova), não `chrome://extensions`.
+**Causa:** o Chrome descarta URLs `chrome://` passadas na linha de comando (no Windows só aceita esquemas web, `file:` e
+`about:blank`); o processo existente recebia o pedido sem URL e abria uma janela vazia. Passar `--profile-directory`
+piora: cai numa janela daquele perfil mesmo que o usuário esteja em outro.
+**Solução:** `Native/ChromeTab` traz para a frente a janela do Chrome mais recente e digita Ctrl+T, `chrome://extensions/`
+e Enter (SendInput), conferindo antes de cada tecla que o Chrome está em primeiro plano; nada é digitado se não estiver.
+
+---
+
+## -24. Popup "instalar a extensão do Chrome" não apareceu ao desinstalar e reinstalar o módulo
+
+**Sintoma:** desinstalar o Cachalot no SwissTechKnife e instalar de novo não mostrou o popup.
+**Causa (host.log + settings.json reais, lidos via WMI):** (1) a reinstalação veio do catálogo configurado no host,
+`catalog-local\catalog.json`, que ainda lista o 1.1.0 (sem o recurso); (2) desinstalar mantém `data\vd-get`, e o
+`ExtensionOffered=true` gravado quando o popup foi *pulado* (extensão já no Chrome) bloquearia qualquer reinstalação.
+**Solução:** `ExtensionPromptShown` só vira true quando o popup aparece; o pulo (sem Chrome ou extensão já carregada)
+fica em `ExtensionCheckedInstall` = pasta do módulo + data de criação, então reinstalar reavalia. A chave antiga é ignorada.
+**Testar:** o popup só aparece se a extensão **não** estiver no Chrome; remova-a em `chrome://extensions` antes.
+
+---
+
 ## -22. Ponte: rota nova `/transient/<op>` dá 404 no módulo real, mas passa no e2e da extensão
 
 **Sintoma:** `POST /transient/format` respondia 404 (autenticado) no SwissTechKnife, enquanto o e2e da extensão
@@ -15,18 +38,6 @@ passava inteiro.
 **Solução:** incluir a operação na lista de `LocalBridge` e testar a rota em `stk/Cachalot.Tests/Program.cs` (bloco
 "Transient mode"). Ao criar uma operação da ponte, mexa nos três lugares (`LocalBridge`, `TransientBridge`, mock) e
 confira no módulo instalado com um `POST` real.
-
----
-
-## -22. Popup "instalar a extensão do Chrome" não apareceu ao desinstalar e reinstalar o módulo
-
-**Sintoma:** desinstalar o Cachalot no SwissTechKnife e instalar de novo não mostrou o popup.
-**Causa (host.log + settings.json reais, lidos via WMI):** (1) a reinstalação veio do catálogo configurado no host,
-`catalog-local\catalog.json`, que ainda lista o 1.1.0 (sem o recurso); (2) desinstalar mantém `data\vd-get`, e o
-`ExtensionOffered=true` gravado quando o popup foi *pulado* (extensão já no Chrome) bloquearia qualquer reinstalação.
-**Solução:** `ExtensionPromptShown` só vira true quando o popup aparece; o pulo (sem Chrome ou extensão já carregada)
-fica em `ExtensionCheckedInstall` = pasta do módulo + data de criação, então reinstalar reavalia. A chave antiga é ignorada.
-**Testar:** o popup só aparece se a extensão **não** estiver no Chrome; remova-a em `chrome://extensions` antes.
 
 ---
 
