@@ -212,7 +212,7 @@ namespace Cachalot.Module
                 {
                     try
                     {
-                        service.Cookies.SaveFromBrowser(page.Host, request.Cookies);
+                        service.SaveBrowserCookies(page.Host, request.Cookies);
                     }
                     catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
                     {
@@ -242,7 +242,7 @@ namespace Cachalot.Module
         private int OnBridgeCookies(string domain, List<Dictionary<string, object>> cookies)
         {
             int count = 0;
-            _context.Dispatcher.Invoke(new Action(() => count = Service.Cookies.SaveFromBrowser(domain, cookies)));
+            _context.Dispatcher.Invoke(new Action(() => count = Service.SaveBrowserCookies(domain, cookies)));
             return count;
         }
 

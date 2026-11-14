@@ -56,6 +56,12 @@ namespace Cachalot.Module.Downloads
         public string CookiesFile { get; set; } = string.Empty;
         public string CookiesBrowser { get; set; } = string.Empty;
 
+        /// <summary>Off: no download uses cookies (stored, imported file or browser) and the extension's are not saved.</summary>
+        public bool CookiesEnabled { get; set; } = true;
+
+        /// <summary>Sites (registrable domains, see <see cref="NormalizeSite"/>) whose cookies are never saved nor used.</summary>
+        public List<string> CookiesDisabledSites { get; set; } = new List<string>();
+
         // Motores
         public bool UseNative { get; set; } = true;
         public bool UseGallery { get; set; } = true;
@@ -121,6 +127,8 @@ namespace Cachalot.Module.Downloads
             ["ignorar_tls"] = IgnoreTls,
             ["cookies_arquivo"] = CookiesFile ?? string.Empty,
             ["cookies_navegador"] = CookiesBrowser ?? string.Empty,
+            ["cookies_ativos"] = CookiesEnabled,
+            ["cookies_sites_off"] = (CookiesDisabledSites ?? new List<string>()).Select(s => (object)s).ToList(),
             ["usar_nativos"] = UseNative,
             ["usar_galeria"] = UseGallery,
             ["usar_navegador"] = UseHeadless,
@@ -134,6 +142,97 @@ namespace Cachalot.Module.Downloads
 
         internal static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 
+        /// <summary>
+        /// Whether cookies may be saved or used for a page on <paramref name="host"/>: the global switch is on and neither
+        /// the host, a parent domain nor an alias of its site (youtu.be ↔ youtube.com, x.com ↔ twitter.com) is disabled.
+        /// Same rule as servidor.cookies_permitidos.
+        /// </summary>
+        internal bool CookiesAllowedFor(string host)
+        {
+            if (!CookiesEnabled)
+            {
+                return false;
+            }
+            List<string> off = CookiesDisabledSites;
+            return off == null || off.Count == 0 || !SiteKeys(host).Any(off.Contains);
+        }
+
+        /// <summary>Turns one site's cookies on or off. Returns false when <paramref name="site"/> is not a site.</summary>
+        internal bool SetSiteCookies(string site, bool enabled)
+        {
+            string key = NormalizeSite(site);
+            if (key.Length == 0)
+            {
+                return false;
+            }
+            CookiesDisabledSites = CookiesDisabledSites ?? new List<string>();
+            CookiesDisabledSites.Remove(key);
+            if (!enabled)
+            {
+                CookiesDisabledSites.Add(key);
+                CookiesDisabledSites.Sort(StringComparer.Ordinal);
+            }
+            return true;
+        }
+
+        /// <summary>The host, each parent domain and the aliases of its site, in lower case.</summary>
+        internal static IEnumerable<string> SiteKeys(string host)
+        {
+            string h = (host ?? string.Empty).Trim().Trim('.').ToLowerInvariant();
+            var keys = new List<string>();
+            string[] parts = h.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                keys.Add(string.Join(".", parts.Skip(i)));
+            }
+            string site = CookieStore.RegistrableDomain(h);
+            if (SiteAliases.TryGetValue(site, out string[] aliases))
+            {
+                keys.AddRange(aliases);
+            }
+            return keys.Distinct();
+        }
+
+        private static readonly Dictionary<string, string[]> SiteAliases = new Dictionary<string, string[]>
+        {
+            ["youtu.be"] = new[] { "youtube.com" },
+            ["youtube-nocookie.com"] = new[] { "youtube.com" },
+            ["x.com"] = new[] { "twitter.com" },
+            ["twitter.com"] = new[] { "x.com" },
+        };
+
+        /// <summary>"https://www.Instagram.com/p/x" or " instagram.com " → "instagram.com"; empty when it is not a site.</summary>
+        internal static string NormalizeSite(string value)
+        {
+            string text = (value ?? string.Empty).Trim().ToLowerInvariant();
+            int scheme = text.IndexOf("://", StringComparison.Ordinal);
+            if (scheme >= 0)
+            {
+                text = text.Substring(scheme + 3);
+            }
+            int end = text.IndexOfAny(new[] { '/', '?', '#' });
+            if (end >= 0)
+            {
+                text = text.Substring(0, end);
+            }
+            int at = text.LastIndexOf('@');
+            if (at >= 0)
+            {
+                text = text.Substring(at + 1);
+            }
+            int port = text.IndexOf(':');
+            if (port >= 0)
+            {
+                text = text.Substring(0, port);
+            }
+            text = text.Trim().Trim('.');
+            if (text.Length == 0 || text.IndexOf('.') < 0 || text.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '.' || ch == '-')))
+            {
+                return string.Empty;
+            }
+            return CookieStore.RegistrableDomain(text);
+        }
+
         internal void Normalize()
         {
             Mode = Modes.Normalize(Mode);
@@ -142,6 +241,8 @@ namespace Cachalot.Module.Downloads
             TransientFormat = TransientFormats.Normalize(TransientFormat);
             Rules = Rules ?? new List<Rule>();
             Channels = Channels ?? new List<Channel>();
+            CookiesDisabledSites = (CookiesDisabledSites ?? new List<string>())
+                .Select(NormalizeSite).Where(s => s.Length > 0).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             foreach (Channel channel in Channels)
             {
                 channel.Seen = channel.Seen ?? new List<string>();

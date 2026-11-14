@@ -1,8 +1,7 @@
-// Options page: pairing code, port override, cookie default.
+// Options page: pairing code and port override (cookies are chosen in Cachalot itself).
 
 import { DEFAULT_PORT, STORAGE_KEYS, describeBridgeError, isValidPort } from "../src/lib/bridge.js";
 import { formatPairingCode, parsePairingCode } from "../src/lib/pairing.js";
-import { clearCookieOverrides, getCookieOverrides, getCookiesDefault, setCookiesDefault } from "../src/lib/settings.js";
 
 const $ = (id) => document.getElementById(id);
 const store = chrome.storage.local;
@@ -39,13 +38,6 @@ async function renderPortInfo() {
   if (!auto && document.activeElement !== $("port")) $("port").value = String(override);
   const last = data[STORAGE_KEYS.port];
   $("portInfo").textContent = auto && isValidPort(last) ? `Última porta encontrada: ${last}` : "";
-}
-
-async function renderOverrides() {
-  const overrides = await getCookieOverrides(store);
-  const n = Object.keys(overrides).length;
-  $("overridesRow").hidden = n === 0;
-  $("overridesText").textContent = n === 1 ? "1 site com escolha própria" : `${n} sites com escolha própria`;
 }
 
 async function onSaveCode(event) {
@@ -134,27 +126,17 @@ async function init() {
   $("version").textContent = chrome.runtime.getManifest().version;
   const data = await store.get(STORAGE_KEYS.code);
   if (data[STORAGE_KEYS.code]) $("code").value = formatPairingCode(data[STORAGE_KEYS.code]);
-  $("cookiesDefault").checked = await getCookiesDefault(store);
 
   $("pairForm").addEventListener("submit", onSaveCode);
   $("test").addEventListener("click", onTest);
   $("portAuto").addEventListener("change", onPortAuto);
   $("port").addEventListener("change", onPortChange);
-  $("cookiesDefault").addEventListener("change", async () => {
-    await setCookiesDefault(store, $("cookiesDefault").checked);
-    renderOverrides();
-  });
-  $("clearOverrides").addEventListener("click", async () => {
-    await clearCookieOverrides(store);
-    renderOverrides();
-  });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (STORAGE_KEYS.port in changes || STORAGE_KEYS.portOverride in changes) renderPortInfo();
-    if ("cookieSiteOverrides" in changes) renderOverrides();
   });
 
-  await Promise.all([renderPortInfo(), renderOverrides(), renderShortcut()]);
+  await Promise.all([renderPortInfo(), renderShortcut()]);
   document.body.dataset.ready = "1";
 }
 

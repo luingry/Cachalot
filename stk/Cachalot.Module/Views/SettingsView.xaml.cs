@@ -73,6 +73,7 @@ namespace Cachalot.Module.Views
             ClipboardSwitch.IsChecked = _prefs.ClipboardSuggest;
             HotkeySwitch.IsChecked = _prefs.HotkeyEnabled;
             TlsSwitch.IsChecked = _prefs.IgnoreTls;
+            CookiesSwitch.IsChecked = _prefs.CookiesEnabled;
 
             Fill(TemplateBox, new[]
             {
@@ -102,6 +103,7 @@ namespace Cachalot.Module.Views
                 if (IsVisible)
                 {
                     LoadTransientFormat();
+                    BuildCookies(); // sites the extension sent meanwhile
                 }
             };
 
@@ -126,6 +128,7 @@ namespace Cachalot.Module.Views
             UpdateSubtitlePanel();
             UpdateFfmpeg();
             UpdateEngines();
+            UpdateCookiesPanel();
             BuildCookies();
             BuildRules();
             BuildChannels();
@@ -452,30 +455,107 @@ namespace Cachalot.Module.Views
 
         // ── cookies ──
 
+        private void OnCookiesSwitch(object sender, RoutedEventArgs e)
+        {
+            if (_loading)
+            {
+                return;
+            }
+            _prefs.CookiesEnabled = CookiesSwitch.IsChecked == true;
+            UpdateCookiesPanel();
+            Save();
+        }
+
+        /// <summary>With cookies off nothing below applies (no site gets any), so the per-site controls are hidden.</summary>
+        private void UpdateCookiesPanel()
+        {
+            CookiesPanel.Visibility = _prefs.CookiesEnabled ? Visibility.Visible : Visibility.Collapsed;
+            CookiesStatus.Text = _prefs.CookiesEnabled
+                ? "A extensão manda os cookies da página junto com o link. Desligue abaixo os sites em que eles não devem ser usados."
+                : "Desligado: nenhum download usa cookies, nem os salvos, nem os do navegador. O que a extensão mandar é descartado.";
+        }
+
+        /// <summary>Sites with stored cookies plus the disabled ones without any, each with its own switch.</summary>
         private void BuildCookies()
         {
             CookieList.Children.Clear();
-            IReadOnlyList<CookieSite> sites = _module.Service.Cookies.List();
-            CookieEmpty.Visibility = sites.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            foreach (CookieSite site in sites)
+            IReadOnlyList<CookieSite> stored = _module.Service.Cookies.List();
+            CookieEmpty.Visibility = stored.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            var rows = stored.Select(s => (Domain: s.Domain, Site: s))
+                .Concat(_prefs.CookiesDisabledSites
+                    .Where(d => !stored.Any(s => string.Equals(s.Domain, d, StringComparison.OrdinalIgnoreCase)))
+                    .Select(d => (Domain: d, Site: (CookieSite)null)))
+                .OrderBy(r => r.Domain, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var row in rows)
             {
-                var row = new Grid { Margin = new Thickness(0, 8, 0, 0) };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                text.Children.Add(Label(site.Domain, "Text.BodyStrong"));
-                text.Children.Add(Label($"{site.Count} cookies · {Age(site.Modified)}", "Text.Caption"));
-                row.Children.Add(text);
-                var remove = IconButton("", "Apagar os cookies de " + site.Domain);
-                remove.Click += (s, e) =>
-                {
-                    _module.Service.Cookies.Delete(site.Domain);
-                    BuildCookies();
-                };
-                Grid.SetColumn(remove, 1);
-                row.Children.Add(remove);
-                CookieList.Children.Add(row);
+                CookieList.Children.Add(CookieRow(row.Domain, row.Site));
             }
+        }
+
+        private FrameworkElement CookieRow(string domain, CookieSite site)
+        {
+            var row = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new StackPanel();
+            text.Children.Add(Label(domain, "Text.BodyStrong"));
+            TextBlock caption = Label(string.Empty, "Text.Caption");
+            caption.TextWrapping = TextWrapping.Wrap;
+            text.Children.Add(caption);
+            var use = new CheckBox { Content = text, IsChecked = _prefs.CookiesAllowedFor(domain), VerticalAlignment = VerticalAlignment.Center, ToolTip = "Usar os cookies de " + domain };
+            use.SetResourceReference(StyleProperty, "Switch");
+            System.Windows.Automation.AutomationProperties.SetName(use, "Usar os cookies de " + domain);
+            void Describe() => caption.Text = use.IsChecked == true
+                ? (site == null ? "Nenhum cookie salvo ainda" : site.Count + " cookies · " + Age(site.Modified))
+                : (site == null ? "Desligado · nenhum cookie salvo" : "Desligado · " + site.Count + " cookies guardados, sem uso");
+            Describe();
+            RoutedEventHandler toggled = (s, e) =>
+            {
+                _prefs.SetSiteCookies(domain, use.IsChecked == true);
+                Describe();
+                Save();
+            };
+            use.Checked += toggled;
+            use.Unchecked += toggled;
+            row.Children.Add(use);
+            var remove = IconButton("", "Apagar os cookies de " + domain);
+            remove.Margin = new Thickness(8, 0, 0, 0);
+            if (site == null)
+            {
+                remove.Visibility = Visibility.Hidden; // nothing to delete; keeps the switches aligned
+            }
+            remove.Click += (s, e) =>
+            {
+                _module.Service.Cookies.Delete(domain);
+                BuildCookies();
+            };
+            Grid.SetColumn(remove, 1);
+            row.Children.Add(remove);
+            return row;
+        }
+
+        private void OnCookieSiteKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                OnAddCookieSite(sender, e);
+            }
+        }
+
+        private void OnAddCookieSite(object sender, RoutedEventArgs e)
+        {
+            string site = Preferences.NormalizeSite(CookieSiteBox.Text);
+            if (site.Length == 0)
+            {
+                CookieSiteBox.Focus();
+                return;
+            }
+            _prefs.SetSiteCookies(site, false);
+            CookieSiteBox.Clear();
+            Save();
+            BuildCookies();
         }
 
         private void OnImportCookies(object sender, RoutedEventArgs e)

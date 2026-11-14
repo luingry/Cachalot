@@ -230,5 +230,85 @@ class Transientes(unittest.TestCase):
             shutil.rmtree(pasta, ignore_errors=True)
 
 
+class Cookies(unittest.TestCase):
+    """Configurações › Login e cookies: desligar tudo ou por site (servidor.cookies_permitidos/cookies_para)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import servidor  # noqa: E402  (só aqui: importa yt-dlp e websockets)
+        cls.s = servidor
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.pasta = tempfile.mkdtemp(prefix="cachalot-cookies-")
+        self.addCleanup(shutil.rmtree, self.pasta, ignore_errors=True)
+        os.makedirs(os.path.join(self.pasta, "cookies"))
+        for site in ("youtube.com", "instagram.com", "x.com"):
+            with open(os.path.join(self.pasta, "cookies", site + ".txt"), "w", encoding="utf-8") as f:
+                f.write("# Netscape HTTP Cookie File\n" + "\t".join(["." + site, "TRUE", "/", "TRUE", "1999999999", "SID", "v"]) + "\n")
+        self.importado = os.path.join(self.pasta, "importado.txt")
+        with open(self.importado, "w", encoding="utf-8") as f:
+            f.write("# Netscape HTTP Cookie File\n")
+        patcher = mock.patch.object(self.s, "PASTA_DADOS", self.pasta)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def o(self, **extra):
+        return {**self.s.config, **extra}
+
+    def test_padroes_permitem(self):
+        self.assertTrue(self.s.CONFIG_PADRAO["cookies_ativos"])
+        self.assertEqual(self.s.CONFIG_PADRAO["cookies_sites_off"], [])
+        self.assertTrue(self.s.cookies_permitidos("https://www.youtube.com/watch?v=1", {}))
+        self.assertTrue(self.s.cookies_permitidos("https://www.youtube.com/watch?v=1", self.o()))
+
+    def test_global_desligado(self):
+        o = self.o(cookies_ativos=False)
+        self.assertFalse(self.s.cookies_permitidos("https://vimeo.com/1", o))
+
+    def test_por_site(self):
+        o = self.o(cookies_sites_off=["instagram.com", " YouTube.com "])
+        permitido = self.s.cookies_permitidos
+        self.assertFalse(permitido("https://www.instagram.com/p/abc/", o))
+        self.assertFalse(permitido("https://scontent.cdninstagram.com/x.mp4", self.o(cookies_sites_off=["cdninstagram.com"])))
+        self.assertFalse(permitido("https://music.youtube.com/watch?v=1", o))   # subdomínio
+        self.assertFalse(permitido("https://youtu.be/abc", o))                   # apelido do mesmo site
+        self.assertFalse(permitido("https://www.youtube-nocookie.com/embed/abc", o))
+        self.assertTrue(permitido("https://vimeo.com/1", o))
+        self.assertTrue(permitido("https://notyoutube.com/1", o))                # sufixo sem ponto não conta
+        self.assertFalse(permitido("https://twitter.com/u/status/1", self.o(cookies_sites_off=["x.com"])))
+        # link de CDN vindo de uma página desligada (Referer/Origin capturados pela extensão)
+        cdn = "https://video.cdn-exemplo.net/v.mp4"
+        self.assertFalse(permitido(cdn, self.o(cookies_sites_off=["instagram.com"], cabecalhos={"Referer": "https://www.instagram.com/p/1/"})))
+        self.assertFalse(permitido(cdn, self.o(cookies_sites_off=["instagram.com"], cabecalhos={"origin": "https://www.instagram.com"})))
+        self.assertTrue(permitido(cdn, self.o(cookies_sites_off=["instagram.com"], cabecalhos={"Referer": "https://vimeo.com/"})))
+
+    def test_cookies_para(self):
+        para = self.s.cookies_para
+        yt = "https://www.youtube.com/watch?v=1"
+        self.assertEqual(para(yt, self.o()), {"arquivo": os.path.join(self.pasta, "cookies", "youtube.com.txt")})
+        self.assertEqual(para("https://twitter.com/u/status/1", self.o()), {"arquivo": os.path.join(self.pasta, "cookies", "x.com.txt")})
+        self.assertEqual(para("https://vimeo.com/1", self.o(cookies_arquivo=self.importado)), {"arquivo": self.importado})
+        self.assertEqual(para("https://vimeo.com/1", self.o(cookies_navegador="firefox")), {"navegador": "firefox"})
+        # desligado: nem o do site, nem o arquivo importado, nem o navegador
+        tudo = {"cookies_arquivo": self.importado, "cookies_navegador": "firefox"}
+        self.assertEqual(para(yt, self.o(cookies_ativos=False, **tudo)), {})
+        self.assertEqual(para(yt, self.o(cookies_sites_off=["youtube.com"], **tudo)), {})
+        self.assertEqual(para("https://youtu.be/1", self.o(cookies_sites_off=["youtube.com"], **tudo)), {})
+        self.assertEqual(para("https://vimeo.com/1", self.o(cookies_sites_off=["youtube.com"], **tudo)), {"arquivo": self.importado})
+
+    def test_estrategias_youtube_sem_cookies(self):
+        erro = "ERROR: [youtube] x: Sign in to confirm you're not a bot"
+        url = "https://www.youtube.com/watch?v=1"
+        com = [n for n, _ in self.s._estrategias_youtube(url, self.o(), erro)]
+        self.assertTrue(any(n.startswith("cookies") for n in com))
+        for o in (self.o(cookies_ativos=False), self.o(cookies_sites_off=["youtube.com"])):
+            sem = self.s._estrategias_youtube(url, o, erro)
+            self.assertFalse(any(n.startswith("cookies") for n, _ in sem), sem)
+            self.assertTrue(all(not a.get("cookies") for _, a in sem))
+            self.assertTrue(any(n.startswith("cliente") for n, _ in sem))
+
+
 if __name__ == "__main__":
     unittest.main()

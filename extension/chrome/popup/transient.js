@@ -116,6 +116,7 @@ const ICONS = {
   redo: ["m15 14 5-5-5-5", "M20 9H9.5a5.5 5.5 0 0 0 0 11H13"],
   reset: ["M3 12h18", "m7 8-4 4 4 4", "m17 8 4 4-4 4"],
   recut: ["M21 12a9 9 0 0 1-15.5 6.2L3 16", "M3 21v-5h5", "M3 12a9 9 0 0 1 15.5-6.2L21 8", "M21 3v5h-5"],
+  group: ["M8 5H5v14h3", "M16 5h3v14h-3", "M9.5 12h5"],
   move: ["M8.5 7h7v10h-7z", "m5 9.5-2.5 2.5L5 14.5", "m19 9.5 2.5 2.5-2.5 2.5"],
   merge: ["M3 12h6.5", "m6.5 8.5 3.5 3.5-3.5 3.5", "M21 12h-6.5", "m17.5 8.5-3.5 3.5 3.5 3.5"],
 };
@@ -340,7 +341,10 @@ export function createTransientView({ request, title, message, onClose }) {
   // merge: centered on the divider the pointer is near; joins the two sections it separates
   const mergeBtn = iconButton(ICONS.merge, "Juntar as duas seções", "tr-merge");
   mergeBtn.hidden = true;
-  wave.append(canvas, tools, moveBtn, mergeBtn, tip, overlay);
+  // group: centered on a selection of sections in a row; joins them into one (Ctrl+G does the same)
+  const groupBtn = iconButton(ICONS.group, "Agrupar as seções selecionadas numa só (Ctrl+G)", "tr-group");
+  groupBtn.hidden = true;
+  wave.append(canvas, tools, moveBtn, mergeBtn, groupBtn, tip, overlay);
 
   const foot = el("div", "tr-foot");
   const footText = el("span", "tr-foot-text", HINT);
@@ -725,6 +729,7 @@ export function createTransientView({ request, title, message, onClose }) {
   function draw() {
     if (!v.analysis || !size.w) return;
     if (!colors) readColors();
+    placeGroup();
     drawOverview();
     const { w, h, dpr } = size;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1389,6 +1394,70 @@ export function createTransientView({ request, title, message, onClose }) {
   }
 
   mergeBtn.addEventListener("click", () => merge(Number(mergeBtn.dataset.index)));
+
+  /** The selected sections when they are two or more in a row (indexes first … last), else null. */
+  function groupRange() {
+    if (v.selected.size < 2) return null;
+    const idx = v.sections.flatMap((x, i) => (v.selected.has(x.key) ? [i] : []));
+    if (idx.length < 2 || idx[idx.length - 1] - idx[0] !== idx.length - 1) return null;
+    return { first: idx[0], last: idx[idx.length - 1] };
+  }
+
+  function placeGroup() {
+    const r = groupRange();
+    if (!r || v.drag || v.shift || v.press || v.fadeDrag || v.originDrag || v.busy) {
+      groupBtn.hidden = true;
+      return;
+    }
+    const x0 = Math.max(0, xOf(v.sections[r.first].start));
+    const x1 = Math.min(size.w, xOf(v.sections[r.last].end));
+    if (x1 <= 0 || x0 >= size.w) {
+      groupBtn.hidden = true;
+      return;
+    }
+    const n = r.last - r.first + 1;
+    groupBtn.title = `Agrupar as ${n} seções selecionadas numa só (Ctrl+G)`;
+    groupBtn.setAttribute("aria-label", groupBtn.title);
+    groupBtn.hidden = false;
+    const bw = groupBtn.offsetWidth || 22;
+    const bh = groupBtn.offsetHeight || 22;
+    groupBtn.style.left = `${clamp((x0 + x1) / 2 - bw / 2, 1, size.w - bw - 1)}px`;
+    // a quarter down the waveform: the middle stays free to hover the sections (and their tools at the bottom)
+    groupBtn.style.top = `${LANE_TOP + (size.h - LANE_BOTTOM - LANE_TOP) / 4 - bh / 2}px`;
+  }
+
+  /** Joins the selected sections in a row into one: fade-in of the first, fade-out of the last, the first's on/off. */
+  function group() {
+    const r = groupRange();
+    if (!r || v.drag || v.shift) return;
+    const first = v.sections[r.first];
+    const last = v.sections[r.last];
+    const inner = v.dividers.slice(r.first + 1, r.last + 1); // the dividers between them
+    change(() => {
+      for (const d of inner) v.edits = removeDivider(v.edits, d);
+      // and any automatic cut a removed divider was hiding
+      for (const c of v.cuts) if (c > first.start + 1e-6 && c < last.end - 1e-6) v.edits = removeDivider(v.edits, { kind: "auto", time: c });
+      const ff = v.fades[first.key];
+      const fl = v.fades[last.key];
+      if (ff || fl) {
+        const f = { ...emptyFade(), ...(ff || {}) };
+        f.out = fl?.out || 0;
+        f.outCurve = fl?.outCurve || 0;
+        if (hasFade(f) || f.inCurve || f.outCurve) v.fades[first.key] = f;
+        else delete v.fades[first.key];
+      }
+      for (let i = r.first + 1; i <= r.last; i++) {
+        const k = v.sections[i].key;
+        delete v.fades[k];
+        v.disabled.delete(k);
+        v.selected.delete(k);
+      }
+      v.selected = new Set([first.key]);
+    });
+    groupBtn.hidden = true;
+  }
+
+  groupBtn.addEventListener("click", group);
   mergeBtn.addEventListener("pointerleave", (e) => {
     if (e.relatedTarget === canvas || tools.contains(e.relatedTarget)) return;
     mergeBtn.hidden = true;
@@ -2056,6 +2125,11 @@ export function createTransientView({ request, title, message, onClose }) {
       updateInfo();
       draw();
       e.preventDefault();
+      return;
+    }
+    if (key === "g" && !e.shiftKey) {
+      e.preventDefault();
+      group();
       return;
     }
     if (key === "z" && !e.shiftKey) undo();

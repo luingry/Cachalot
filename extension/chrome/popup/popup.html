@@ -31,7 +31,7 @@
         </div>
       </header>
 
-      <section id="status" class="status card" data-state="checking" aria-live="polite">
+      <section id="status" class="status card" data-state="checking" aria-live="polite" hidden>
         <div class="status-line">
           <span class="dot"></span>
           <span id="statusText" class="status-text">Procurando o Cachalot…</span>
@@ -107,17 +107,6 @@
         <div id="previewPop" class="preview-pop" aria-hidden="true"></div>
       </section>
 
-      <section class="card cookies">
-        <div class="cookie-text">
-          <label for="cookieSwitch" class="cookie-label">Enviar cookies deste site</label>
-          <span id="cookieMeta" class="meta"></span>
-        </div>
-        <button id="syncCookies" class="link-btn" type="button" title="Enviar os cookies deste site ao Cachalot agora">Sincronizar</button>
-        <label class="switch" title="Enviar cookies deste site">
-          <input id="cookieSwitch" type="checkbox" />
-          <span class="track"><span class="knob"></span></span>
-        </label>
-      </section>
     </main>
   </body>
 </html>

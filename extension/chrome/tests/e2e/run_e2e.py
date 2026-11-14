@@ -407,7 +407,9 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
         # Just one part, already paired with the mock (on its own port when Cachalot itself is running).
         sw_eval("([code, port]) => chrome.storage.local.set({ pairingCode: code, portOverride: port })", [CODE, BRIDGE_PORT])
         open_popup()
-        c("popup paired with the mock", popup.eval_on_selector("#status", "e => e.dataset.state") == "paired")
+        c("popup paired with the mock; connected, no status block and no cookie switch",
+          popup.eval_on_selector("#status", "e => e.dataset.state") == "paired" and popup.locator("#status").is_hidden()
+          and popup.locator(".cookies").count() == 0)
         AUDIO = "Áudio"
 
         def row_css(label):
@@ -464,8 +466,8 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     meta_video = popup.locator(row_css(VIDEO) + " .media-meta").inner_text()
     c("popup: video row shows the size", "KB" in meta_video or "MB" in meta_video, meta_video)
     c("popup: page title shown", text("#pageTitle") == PAGE_TITLE, text("#pageTitle"))
-    c("popup: cookie switch on by default", popup.locator("#cookieSwitch").is_checked())
-    c("popup: cookie meta shows the registrable domain", text("#cookieMeta").startswith("cachalot-test.com · 2 cookies"), text("#cookieMeta"))
+    c("popup: no cookie switch (cookies are chosen in Cachalot's settings)",
+      popup.locator("#cookieSwitch").count() == 0 and popup.locator(".cookies").count() == 0)
 
     # Thumbnails and previews by media type. The streams are hotlink-protected
     # (Referer required): they only load through the popup's Referer rule.
@@ -572,8 +574,8 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     popup.fill("#pairInput", "  abcd 2345 ")
     popup.click("#pairButton")
     popup.wait_for_function("() => document.getElementById('status').dataset.state === 'paired'", timeout=8000)
-    c("popup: pairing normalizes the code and connects", text("#statusText") == "Conectado ao Cachalot")
-    c("popup: version shown", text("#statusMeta") == "v9.9.9", text("#statusMeta"))
+    c("popup: pairing normalizes the code and connects; connected, the status block goes away",
+      popup.locator("#status").is_hidden() and text("#statusText") == "Conectado ao Cachalot")
     stored = local_storage()
     c("code stored normalized", stored.get("pairingCode") == CODE, str(stored.get("pairingCode")))
     c("working port remembered", stored.get("bridgePort") == BRIDGE_PORT, str(stored.get("bridgePort")))
@@ -652,27 +654,13 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     c("page Baixar: no extra message below the button (it shows the queue itself)", popup.locator("#pageFeedback").is_hidden())
     shot(popup, "04-sent.png")
 
-    popup.click(".cookies .switch")
-    time.sleep(0.3)
-    c("cookie switch off stored per site", local_storage().get("cookieSiteOverrides") == {"cachalot-test.com": False}, str(local_storage().get("cookieSiteOverrides")))
     n = count("/download")
     popup.click("#sendAudio")
     req = wait_request("/download", n)
     body = req["body"] if req else {}
     c("Só áudio: mode audio", body.get("mode") == "audio" and body.get("urls") == [PAGE_URL], str(body))
-    c("Só áudio with switch off: no cookies", "cookies" not in body, str(body.get("cookies")))
-    shot(popup, "04b-cookies-off.png")
-    popup.click(".cookies .switch")
-    time.sleep(0.3)
-    c("cookie switch back on clears the site choice", local_storage().get("cookieSiteOverrides") == {}, str(local_storage().get("cookieSiteOverrides")))
-
-    n = count("/cookies")
-    popup.click("#syncCookies")
-    req = wait_request("/cookies", n)
-    body = req["body"] if req else {}
-    c("Sincronizar: POST /cookies with the page domain", body.get("domain") == "cachalot-test.com" and len(body.get("cookies", [])) == 2, str(body))
-    popup.wait_for_function("() => document.getElementById('cookieMeta').textContent.includes('sincronizados')", timeout=5000)
-    c("Sincronizar: inline confirmation", "sincronizados" in text("#cookieMeta"), text("#cookieMeta"))
+    c("Só áudio: the site's cookies always go along (Cachalot decides whether to use them)",
+      len(body.get("cookies", [])) == 2, str(body.get("cookies")))
 
     # 5b. Transient mode: the waveform icon right of "Baixar" turns the card into its waveform.
     _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot)
@@ -831,7 +819,6 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     c("unsupported page: explained", "não pode ser enviada" in text("#pageTitle"), text("#pageTitle"))
     c("unsupported page: buttons disabled", popup.locator("#sendPage").is_disabled() and popup.locator("#sendAudio").is_disabled())
     c("unsupported page: nothing-to-download text", text("#mediaEmpty") == "Nada para baixar nesta página.", text("#mediaEmpty"))
-    c("unsupported page: cookie switch disabled", popup.locator("#cookieSwitch").is_disabled())
     shot(popup, "09-unsupported.png")
 
     # 12. YouTube: the page's own video is previewed in the page card (never listed);
@@ -1519,6 +1506,49 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
     c("transient: the drag snaps to the grid; the section it covers goes away and the one it left is disabled",
       close(dividers_now(), d) and int(ds("active")) == active - 1 and i in json.loads(ds("disabled"))
       and i + 1 not in json.loads(ds("disabled")), f"{ds('active')} {ds('disabled')}")
+    popup.locator(".tr-undo").click()
+
+    # grouping: sections selected in a row get a button centered on them that joins them (Ctrl+G does the same)
+    d = dividers_now()
+    # three whole bars in a row (wide enough to click), none disabled
+    j = next(k for k in range(1, len(d) - 3)
+             if d[k] >= vs and d[k + 3] <= ve and all(abs(d[k + m + 1] - d[k + m] - 2) < 2e-3 for m in range(3))
+             and not {k, k + 1, k + 2} & set(json.loads(ds("disabled"))))
+
+    def ctrl_click(*indexes):
+        popup.keyboard.down("Control")
+        for k in indexes:
+            popup.mouse.click(vx((d[k] + d[k + 1]) / 2), y)
+        popup.keyboard.up("Control")
+        popup.wait_for_timeout(100)
+
+    def select(*indexes):
+        if ds("selected") != "0":
+            popup.mouse.click(vx((d[j] + d[j + 1]) / 2), y)  # a plain click clears the selection (and plays)
+            popup.wait_for_timeout(400)
+            if "is-playing" in (popup.get_attribute(".tr-play", "class") or ""):
+                popup.locator(".tr-play").click()
+        ctrl_click(*indexes)
+
+    select(j, j + 2)
+    c("transient: no group button for sections that are not in a row",
+      int(ds("selected")) == 2 and popup.locator(".tr-group").is_hidden(), ds("selected"))
+    ctrl_click(j + 1)
+    gb = popup.locator(".tr-group").bounding_box() if popup.locator(".tr-group").is_visible() else None
+    mid = (vx(d[j]) + vx(d[j + 3])) / 2
+    c("transient: three sections in a row selected: the group button sits in the middle of them",
+      gb is not None and abs(gb["x"] + gb["width"] / 2 - mid) < 2, f"{gb} {mid}")
+    sections = int(ds("sections"))
+    popup.locator(".tr-group").click()
+    after = dividers_now()
+    c("transient: the group button joins them into one section",
+      int(ds("sections")) == sections - 2 and any(abs(t - d[j]) < 1e-3 for t in after)
+      and any(abs(t - d[j + 3]) < 1e-3 for t in after) and not any(d[j] + 1e-3 < t < d[j + 3] - 1e-3 for t in after)
+      and int(ds("selected")) == 1, str(after[:8]))
+    popup.locator(".tr-undo").click()
+    select(j, j + 1, j + 2)
+    popup.keyboard.press("Control+g")
+    c("transient: Ctrl+G groups the selection too", int(ds("sections")) == sections - 2, ds("sections"))
     popup.locator(".tr-undo").click()
 
 

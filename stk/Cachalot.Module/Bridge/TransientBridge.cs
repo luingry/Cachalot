@@ -97,12 +97,12 @@ namespace Cachalot.Module.Bridge
             string page = Str(body, "pageUrl");
             Dictionary<string, object> options = await OnUi(() =>
             {
-                // same as POST /download: the site's cookies go to the store yt-dlp reads
+                // same as POST /download: the site's cookies go to the store yt-dlp reads (unless off in the settings)
                 if (cookies.Count > 0 && Uri.TryCreate(page.Length > 0 ? page : url, UriKind.Absolute, out Uri origin))
                 {
                     try
                     {
-                        service.Cookies.SaveFromBrowser(origin.Host, cookies);
+                        service.SaveBrowserCookies(origin.Host, cookies);
                     }
                     catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
                     {

@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,15 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.4.0",
+      "notes": [
+        "Transient mode: select two or more sections in a row and a button in the middle of them joins them into one section; Ctrl+G does the same.",
+        "Cookies are now chosen in Cachalot, not in the extension: Settings › Login e cookies has a switch to stop using cookies entirely and a switch per site, also for sites with no stored cookies yet.",
+        "A disabled site's cookies are neither saved nor used: no stored, imported, cookies.txt or browser cookies for its downloads.",
+        "The extension popup no longer shows \"Conectado ao Cachalot\": the connection only appears when something is wrong (Cachalot closed or not paired), and the \"Enviar cookies deste site\" switch is gone."
+      ]
+    },
     {
       "version": "2.3.0",
       "notes": [

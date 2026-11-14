@@ -164,6 +164,10 @@ button[data-dl="fail"] {
   transition: background-color var(--slow) var(--ease);
 }
 
+.status[hidden] {
+  display: none;
+}
+
 .status-line {
   display: flex;
   align-items: center;
@@ -813,33 +817,6 @@ button[data-dl="fail"] {
   color: var(--text-3);
 }
 
-/* ---- Cookies ---------------------------------------------------------- */
-
-.cookies {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-}
-
-.cookie-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.cookie-label {
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cookie-text .meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ---- Transient mode ------------------------------------------------------
    The card turns into the waveform of its audio, cut into sections. The popup
    widens while it is open so the waveform has room. */
@@ -1227,7 +1204,8 @@ body.has-transient {
   cursor: pointer;
 }
 
-.tr-merge {
+.tr-merge,
+.tr-group {
   position: absolute;
   width: 22px;
   height: 22px;
@@ -1238,12 +1216,14 @@ body.has-transient {
   animation: pop-fade var(--mid) var(--ease);
 }
 
-.tr-merge svg {
+.tr-merge svg,
+.tr-group svg {
   width: 13px;
   height: 13px;
 }
 
-.tr-merge:hover {
+.tr-merge:hover,
+.tr-group:hover {
   background: var(--accent);
   color: #1a0f08;
 }

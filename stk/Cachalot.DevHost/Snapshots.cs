@@ -154,6 +154,18 @@ namespace Cachalot.DevHost
                 NewItems = new List<ChannelItem> { new ChannelItem { Url = "https://www.youtube.com/watch?v=1" }, new ChannelItem { Url = "https://www.youtube.com/watch?v=2" } },
             });
             prefs.Channels.Add(new Channel { Id = "ch2", Url = "https://www.youtube.com/@blender", Title = "Blender", LastCheckedTs = now - 7200, AutoDownload = true, IntervalMinutes = 360, Seeded = true });
+
+            // Login e cookies: two sites with stored cookies (one turned off) and one turned off before having any.
+            foreach (string site in new[] { "youtube.com", "instagram.com" })
+            {
+                service.Cookies.SaveFromBrowser(site, new[]
+                {
+                    new Dictionary<string, object> { ["name"] = "SID", ["value"] = "v", ["domain"] = "." + site, ["path"] = "/" },
+                    new Dictionary<string, object> { ["name"] = "PREF", ["value"] = "v", ["domain"] = "." + site, ["path"] = "/" },
+                });
+            }
+            prefs.SetSiteCookies("instagram.com", false);
+            prefs.SetSiteCookies("tiktok.com", false);
         }
 
         private static void Render(FrameworkElement element, string path, Rect? region = null)
