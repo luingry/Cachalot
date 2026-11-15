@@ -1310,13 +1310,13 @@ body.has-transient {
   color: var(--accent-text);
 }
 
-/* Ctrl held: a click plays from that point, so nothing floating on the waveform takes it */
+/* Alt held: a click plays from that point, so nothing floating on the waveform takes it */
 .transient.is-seeking .tr-canvas {
   cursor: crosshair !important;
 }
 
+/* (not the move pill: there Alt is the free drag) */
 .transient.is-seeking .tr-tools,
-.transient.is-seeking .tr-move,
 .transient.is-seeking .tr-merge,
 .transient.is-seeking .tr-group {
   pointer-events: none;

@@ -5,6 +5,29 @@ Antes de investigar um erro novo, consulte esta lista.
 
 ---
 
+## -30. Extensão: "Unchecked runtime.lastError: No tab with id: …" na página de erros
+
+**Sintoma:** `chrome://extensions` → Erros listava `Unchecked runtime.lastError: No tab with id: 682404005.`, contexto
+"Desconhecido", pilha `:0 (função anônima)`.
+**Causa:** `refreshTab` lê a aba e depois pinta ícone/badge; se a aba fecha no meio, `chrome.action.setIcon` falha.
+Na forma de promise o `setIcon` **resolve normalmente** (medido: `await chrome.action.setIcon({ tabId: inexistente })`
+dá "ok") e o erro fica em `lastError` sem ninguém ler, então o `try/catch` nunca o via.
+**Solução:** `actionCall` em `src/background.js`: as chamadas por aba de `chrome.action` (setIcon, setBadge*) usam
+callback e leem `chrome.runtime.lastError`. Não volte a chamar essas APIs na forma de promise.
+
+---
+
+## -29. Modo transiente: Alt+clique (tocar dali) quebrou o arrasto livre da pílula de mover seção
+
+**Sintoma:** no e2e, arrastar uma seção com Alt (sem encaixe) não movia nada.
+**Causa:** com Alt seguro a view põe `is-seeking` e os botões flutuantes ganham `pointer-events: none`, para o
+Alt+clique passar até a waveform. A pílula `.tr-move` também ficou transparente, então o arrasto ia para o canvas.
+**Solução:** a pílula fica fora do `is-seeking` (nela Alt é o arrasto livre). Antes de usar um modificador num
+gesto novo, procure se ele já tem outro papel: Alt solta os encaixes (divisória, bandeira, mover seção, duplo
+clique), Ctrl/Shift somam na seleção.
+
+---
+
 ## -26. Modo transiente: a divisão de seções não caía na entrada dos instrumentos (drop depois de uma subida)
 
 **Sintoma:** em músicas com introdução/subida e drop (ex.: Öspiel - The Second Before, drop em 13,96 s), a divisória

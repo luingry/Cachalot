@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,14 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.5.1",
+      "notes": [
+        "Transient mode: Alt+click (not Ctrl) plays the song from exactly the point clicked; Alt still frees a drag from the snaps.",
+        "Transient mode: Ctrl+click selects any section when nothing is selected, then only the one right next to the selection, so it grows in one piece (a selected one comes off from the ends). Shift+click still toggles any section.",
+        "The extension no longer lists \"Unchecked runtime.lastError: No tab with id\" errors when a tab closes while its icon is being updated."
+      ]
+    },
     {
       "version": "2.5.0",
       "notes": [

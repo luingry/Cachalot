@@ -41,11 +41,28 @@ const iconStates = new Map();
 
 // ---- Toolbar icon and badge ----------------------------------------------
 
+/**
+ * A per-tab chrome.action call that never complains about a tab closed meanwhile. setIcon's own bindings report
+ * "Unchecked runtime.lastError: No tab with id" on the extension's error page even when its promise is awaited and
+ * caught; a callback that reads lastError is the only way to mark the error as handled. Resolves false then.
+ */
+function actionCall(method, details) {
+  const fn = chrome.action[method];
+  if (typeof fn !== "function") return Promise.resolve(true);
+  return new Promise((resolve) => {
+    try {
+      fn.call(chrome.action, details, () => resolve(!chrome.runtime.lastError));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 async function paintBadge(tabId, text, color) {
   await Promise.all([
-    chrome.action.setBadgeBackgroundColor({ tabId, color }),
-    chrome.action.setBadgeTextColor ? chrome.action.setBadgeTextColor({ tabId, color: BADGE_TEXT_COLOR }) : null,
-    chrome.action.setBadgeText({ tabId, text }),
+    actionCall("setBadgeBackgroundColor", { tabId, color }),
+    actionCall("setBadgeTextColor", { tabId, color: BADGE_TEXT_COLOR }),
+    actionCall("setBadgeText", { tabId, text }),
   ]);
 }
 
@@ -88,7 +105,7 @@ async function refreshTab(tabId, knownTab = null, knownItems = null) {
   try {
     // Tab-specific action state is reset by Chrome on navigation, so it is
     // always written, never cached.
-    await chrome.action.setIcon({ tabId, path: ICONS[state] });
+    if (!(await actionCall("setIcon", { tabId, path: ICONS[state] }))) return; // the tab closed meanwhile
     if (!feedback.isActive(tabId)) await paintBadge(tabId, count > 0 ? String(count) : "", BADGE_COLOR);
   } catch {
     // tab went away meanwhile
