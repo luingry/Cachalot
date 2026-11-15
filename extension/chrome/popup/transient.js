@@ -101,7 +101,7 @@ const GRID_TITLES = {
 const RULER_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 const ORIGIN_TITLE = "Compasso 1: fica no começo do áudio; arraste para marcar onde a música começa e as seções andam junto · Alt solta do transiente · duplo clique volta ao começo";
 const HINT =
-  "Arraste a bandeira azul na régua para marcar o compasso 1 · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Ctrl+clique toca dali · Ctrl+Z desfaz";
+  "Arraste a bandeira azul na régua para marcar o compasso 1 · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · Ctrl+clique soma o trecho vizinho · Shift+clique liga/desliga um · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Alt+clique toca dali · Ctrl+Z desfaz";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ICONS = {
@@ -1756,15 +1756,16 @@ export function createTransientView({ request, title, titleEdited = false, messa
       v.press = { mode: "pan", x, start: v.start, end: v.end, moved: false };
       return;
     }
-    // Ctrl + click plays from exactly that point, wherever it lands (a divider, a fade handle, the flag)
-    const seek = e.ctrlKey || e.metaKey;
-    if (!seek && originHandleAt(x, y)) {
+    // Alt + click plays from exactly that point, wherever it lands (a divider, a fade handle, the flag): the press
+    // starts as usual (Alt also frees a drag from the snaps) and, released without moving, it is the click
+    v.altClick = e.button === 0 && e.altKey ? { x } : null;
+    if (originHandleAt(x, y)) {
       const at = flagTime();
       v.originDrag = { time: at, grab: x - xOf(at), moved: false }; // keeps where the flag was grabbed
       canvas.style.cursor = "ew-resize";
       return;
     }
-    if (!seek && v.settings.slices) {
+    if (v.settings.slices) {
       const fade = fadeHandleAt(x, y);
       if (fade) {
         const f = v.fades[fade.key] || emptyFade();
@@ -1778,14 +1779,17 @@ export function createTransientView({ request, title, titleEdited = false, messa
         return;
       }
     }
-    // a drag selects (Ctrl/Shift adds); a click plays: Ctrl, or the slices hidden, from the point clicked
-    const add = seek || e.shiftKey;
-    v.press = { mode: "select", x, t0: tOf(x), t1: tOf(x), add, seek, base: add ? new Set(v.selected) : new Set(), moved: false };
+    // a drag selects (Ctrl/Shift adds); a click plays the section (the slices hidden: the song from there),
+    // Ctrl + click adds the section next to the selection, Shift + click toggles any
+    const near = e.ctrlKey || e.metaKey;
+    const add = near || e.shiftKey;
+    v.press = { mode: "select", x, t0: tOf(x), t1: tOf(x), add, near, base: add ? new Set(v.selected) : new Set(), moved: false };
   });
 
   canvas.addEventListener("pointermove", (e) => {
     v.pointerX = localX(e);
     v.pointerY = localY(e);
+    if (v.altClick && Math.abs(v.pointerX - v.altClick.x) >= 4) v.altClick = null; // a drag, not a click
     if (!v.analysis) return;
     if (v.shift) {
       moveShift(v.pointerX, e.altKey);
@@ -1842,7 +1846,18 @@ export function createTransientView({ request, title, titleEdited = false, messa
     refreshHover();
   });
 
+  /** The end of a press; an Alt + click (no move) puts back whatever it grabbed and plays from that point. */
   function endPointer(e, cancelled = false) {
+    const alt = !cancelled && v.altClick;
+    v.altClick = null;
+    finishPress(cancelled || Boolean(alt));
+    if (alt) {
+      clearTimeout(v.clickTimer);
+      playFrom(tOf(alt.x));
+    }
+  }
+
+  function finishPress(cancelled) {
     if (v.shift) {
       endShift(cancelled);
       refreshHover();
@@ -1891,13 +1906,15 @@ export function createTransientView({ request, title, titleEdited = false, messa
         draw();
       }
     } else if (v.press) {
-      const { moved, x, mode, add, seek } = v.press;
+      const { moved, x, mode, add, near } = v.press;
       v.press = null;
       if (!moved && !cancelled && mode === "select") {
         const section = sectionAt(x);
         clearTimeout(v.clickTimer);
-        if (seek || !v.settings.slices) {
+        if (!v.settings.slices) {
           playFrom(tOf(x));
+        } else if (near) {
+          selectNext(section);
         } else if (add) {
           // Shift + click: the section joins or leaves the selection
           const key = v.sections[section]?.key;
@@ -1911,6 +1928,32 @@ export function createTransientView({ request, title, titleEdited = false, messa
       draw();
     }
     refreshHover();
+  }
+
+  /**
+   * Ctrl + click: with nothing selected, any section; otherwise only one right next to a selected one, so the
+   * selection grows in one piece. A selected one leaves it from the ends (one in the middle would split it).
+   */
+  function selectNext(index) {
+    const s = v.sections[index];
+    if (!s) return;
+    const selectedAt = (k) => Boolean(v.sections[k] && v.selected.has(v.sections[k].key));
+    if (v.selected.has(s.key)) {
+      if (!(selectedAt(index - 1) && selectedAt(index + 1))) v.selected.delete(s.key);
+      else flashTip(xOf((s.start + s.end) / 2), "Ctrl+clique: tire pelas pontas da seleção");
+      return;
+    }
+    if (!v.selected.size || selectedAt(index - 1) || selectedAt(index + 1)) v.selected.add(s.key);
+    else flashTip(xOf((s.start + s.end) / 2), "Ctrl+clique: só um trecho ao lado da seleção");
+  }
+
+  let tipTimer = 0;
+  function flashTip(x, text) {
+    showTip(x, text);
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => {
+      if (!v.drag && !v.shift && !v.fadeDrag && !v.originDrag) tip.hidden = true;
+    }, 1400);
   }
 
   canvas.addEventListener("pointerup", (e) => endPointer(e));
@@ -1941,7 +1984,7 @@ export function createTransientView({ request, title, titleEdited = false, messa
   canvas.addEventListener("dblclick", (e) => {
     if (!v.analysis) return;
     clearTimeout(v.clickTimer);
-    if (e.ctrlKey || e.metaKey) return; // two Ctrl+clicks: two seeks, not a new divider
+    if (e.ctrlKey || e.metaKey) return; // two Ctrl+clicks pick sections, they make no divider
     const x = localX(e);
     if (originHandleAt(x, localY(e))) {
       // back to where the analysis found the start
@@ -2176,16 +2219,16 @@ export function createTransientView({ request, title, titleEdited = false, messa
   }
   document.addEventListener("keydown", onKey);
 
-  // Ctrl held: the waveform plays from wherever it is clicked, so the buttons floating on it step aside
+  // Alt held: the waveform plays from wherever it is clicked, so the buttons floating on it step aside
   const seeking = (on) => node.classList.toggle("is-seeking", Boolean(on));
   const onModifier = (e) => {
-    if (e.key === "Control" || e.key === "Meta") seeking(e.type === "keydown");
+    if (e.key === "Alt") seeking(e.type === "keydown");
   };
   const onBlurWindow = () => seeking(false);
   document.addEventListener("keydown", onModifier);
   document.addEventListener("keyup", onModifier);
   window.addEventListener("blur", onBlurWindow);
-  wave.addEventListener("pointermove", (e) => seeking(e.ctrlKey || e.metaKey));
+  wave.addEventListener("pointermove", (e) => seeking(e.altKey));
 
   toolDownload.addEventListener("click", () => {
     // one file per section, numbered by its place in the song
@@ -2348,7 +2391,7 @@ export function createTransientView({ request, title, titleEdited = false, messa
 
   playBtn.addEventListener("click", playPause);
 
-  /** The whole song from `t` (Ctrl + click, or any click with the slices hidden); Loop goes round the song. */
+  /** The whole song from `t` (Alt + click, or any click with the slices hidden); Loop goes round the song. */
   function playFrom(t) {
     const end = v.analysis.duration;
     v.paused = null;

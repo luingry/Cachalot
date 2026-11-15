@@ -985,15 +985,15 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     cb = popup.locator(".tr-canvas").bounding_box()
     dur = float(ds("duration"))
     before_seek = dividers_now()
-    # right on the middle of the song: a divider sits there, with its merge button; with Ctrl it plays, not merges
+    # right on the middle of the song: a divider sits there, with its merge button; with Alt it plays, not merges
     popup.mouse.move(cb["x"] + cb["width"] * 0.5, cb["y"] + cb["height"] / 2)
-    popup.keyboard.down("Control")
+    popup.keyboard.down("Alt")
     popup.mouse.move(cb["x"] + cb["width"] * 0.5 + 1, cb["y"] + cb["height"] / 2)
     popup.mouse.click(cb["x"] + cb["width"] * 0.5, cb["y"] + cb["height"] / 2)
-    popup.keyboard.up("Control")
+    popup.keyboard.up("Alt")
     popup.wait_for_timeout(150)
     pr = ds("playRange") or ""
-    c("transient: Ctrl+click plays the whole song from the point clicked", pr == f"0,{dur}" or pr.startswith("0,"), pr)
+    c("transient: Alt+click plays the whole song from the point clicked", pr == f"0,{dur}" or pr.startswith("0,"), pr)
     popup.locator(".tr-play").click()  # pause
     paused = float(ds("paused") or -1)
     c("transient: ...from about the middle, nothing merged", abs(paused - dur * 0.5) < 1.5 and dividers_now() == before_seek,
@@ -1599,6 +1599,25 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
             if "is-playing" in (popup.get_attribute(".tr-play", "class") or ""):
                 popup.locator(".tr-play").click()
         shift_click(*indexes)
+
+    # Ctrl + click: any section when nothing is selected, then only the one right next to the selection
+    select()
+    def ctrl_click(k):
+        popup.keyboard.down("Control")
+        popup.mouse.click(vx((d[k] + d[k + 1]) / 2), y)
+        popup.keyboard.up("Control")
+        popup.wait_for_timeout(100)
+    ctrl_click(j)
+    c("transient: Ctrl+click with nothing selected selects any section", ds("selected") == "1", ds("selected"))
+    ctrl_click(j + 2)
+    c("transient: Ctrl+click on a section not next to the selection does nothing", ds("selected") == "1", ds("selected"))
+    ctrl_click(j + 1)
+    ctrl_click(j + 2)
+    c("transient: Ctrl+click adds the sections right next to the selection", ds("selected") == "3", ds("selected"))
+    ctrl_click(j + 1)
+    c("transient: Ctrl+click does not take one out of the middle", ds("selected") == "3", ds("selected"))
+    ctrl_click(j + 2)
+    c("transient: Ctrl+click takes one off an end", ds("selected") == "2", ds("selected"))
 
     select(j, j + 2)
     c("transient: no group button for sections that are not in a row",

@@ -95,8 +95,13 @@ mais nova).
       fade-in da primeira e o fade-out da segunda).
     - As divisórias arrastam com o mouse (grudam no transiente mais próximo; com Alt, livres), inclusive o início e o
       fim; duplo clique cria ou remove uma divisória; clique ouve a seção.
-    - Arrastar numa área vazia **seleciona** as seções que cruza (Ctrl/Shift somam, Ctrl+clique liga/desliga uma,
-      Ctrl+A seleciona todas, clique simples limpa). Com duas ou mais seções seguidas selecionadas aparece, no meio
+    - Arrastar numa área vazia **seleciona** as seções que cruza (Ctrl/Shift somam, Ctrl+A seleciona todas, clique
+      simples limpa). **Ctrl+clique** seleciona uma seção qualquer se nada estiver selecionado e, depois, só a
+      vizinha imediata de uma já selecionada (tirar, só pelas pontas); **Shift+clique** liga/desliga qualquer uma.
+    - **Alt+clique** em qualquer ponto da waveform (até sobre uma divisória ou alça) toca a música dali até o fim;
+      com Alt seguro os botões flutuantes ficam transparentes e deixam o clique passar.
+    - **Show slices** (ao lado do Loop, sempre marcado ao abrir): desmarcado, a waveform mostra só a música, qualquer
+      clique toca dali e o play segue pela música inteira. Com duas ou mais seções seguidas selecionadas aparece, no meio
       delas, o botão **agrupar**: junta todas numa seção só (fade-in da primeira, fade-out da última); **Ctrl+G** faz o
       mesmo.
     - Com o ponteiro numa seção aparecem **baixar**, **÷2** (divide em duas partes iguais), **×2** (dobra: junta o que
