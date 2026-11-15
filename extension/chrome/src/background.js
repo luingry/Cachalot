@@ -380,10 +380,11 @@ const handlers = {
     };
   },
 
-  async sendPage({ tabId, mode = null, cookies }) {
+  async sendPage({ tabId, mode = null, cookies, title = null }) {
     const tab = await getTab(tabId);
     if (!tab) return { ok: false, error: "unsupported_page" };
-    return sendToCachalot(tab, { urls: [tab.url], mode, cookies });
+    // title: the name the user typed in the popup (none: the tab's)
+    return sendToCachalot(tab, { urls: [tab.url], mode: mode === "audio" ? "audio" : null, cookies, title: title ? String(title) : null });
   },
 
   async sendMedia({ tabId, id, cookies }) {

@@ -54,9 +54,12 @@ A extensão transforma o cartão de uma mídia na waveform do áudio, cortada no
    anacruse bem mais fraca logo antes do drop não conta). `refineTempo` ajusta o BPM por mínimos quadrados na música
    inteira (no grave, tolerância até 20 ms) e `tempoMap` dá a grade: fixa (origem + k × tempo) ou, se a música varia,
    dinâmica (uma reta por 4 compassos). `trackBeats` só lê essa grade e `gridLines` corta em cada linha, então a
-   seção tem o tamanho da divisão. Com `detect` (caixa *Auto-detect transient*, sempre desligada ao abrir) o corte
+   seção tem o tamanho da divisão. Com `detect` (caixa *Transient detection*, sempre desligada ao abrir) o corte
    vai para o ataque do próprio tempo (`cutAt`) e a sensibilidade filtra os candidatos do Auto; sem ela o corte fica
-   exatamente na linha. Avaliação: gêneros sintéticos de `tests/songs.mjs` em `tests/tempo.test.mjs`. Tudo
+   exatamente na linha. Auto e o recorte pelos transientes (`TRANSIENT_GRID`) quantizam (`quantized` em
+   `detectCuts`): blocos de 1 (Auto) ou 4 compassos desde o compasso 1, divididos ao meio enquanto uma marca cai
+   dentro, até a unidade de `sliceUnit` (1/16, 1/8 ou um tempo, o primeiro ≥ 150 ms); toda seção tem 2^k unidades e
+   começa num múltiplo do próprio tamanho. Avaliação: gêneros sintéticos de `tests/songs.mjs` em `tests/tempo.test.mjs`. Tudo
    recalcula em tempo real. As edições do usuário (divisórias fixadas,
    suprimidas, início/fim, `origin` = início da música marcado pela bandeira) sobrevivem a uma nova detecção.
    `withOrigin` põe o compasso 1 no início marcado: a grade é contada dali e, antes dele, não há cortes.

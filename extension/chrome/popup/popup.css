@@ -850,6 +850,56 @@ body.has-transient {
   grid-template-columns: auto 1fr auto auto;
 }
 
+/* audio only: no "Só áudio", "Baixar" takes its room */
+.actions.is-audio {
+  grid-template-columns: 1fr;
+}
+
+.actions.is-audio:has(.folder-btn) {
+  grid-template-columns: auto 1fr;
+}
+
+.actions.is-audio.has-transient {
+  grid-template-columns: 1fr auto;
+}
+
+.actions.is-audio.has-transient:has(.folder-btn) {
+  grid-template-columns: auto 1fr auto;
+}
+
+/* a name renamed in place: same font, a text cursor and a slightly lighter field on hover */
+.editable-title {
+  margin: -2px -5px;
+  padding: 2px 5px;
+  border-radius: 6px;
+  cursor: text;
+  outline: none;
+  transition: background-color var(--mid) var(--ease);
+}
+
+.editable-title:hover,
+.editable-title.is-editing {
+  background-color: color-mix(in srgb, var(--surface) 85%, #fff);
+}
+
+.editable-title:focus-visible:not(.is-editing) {
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.editable-title.is-editing {
+  display: block;
+  -webkit-line-clamp: unset;
+  text-overflow: clip;
+  white-space: normal;
+  overflow: visible;
+  box-shadow: 0 0 0 1px rgba(232, 116, 60, 0.45);
+}
+
+.editable-title.is-locked {
+  cursor: default;
+  background-color: transparent;
+}
+
 .actions .transient-open {
   width: 34px;
   height: 34px;
@@ -926,13 +976,14 @@ body.has-transient {
 .tr-controls-top {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-height: 18px;
 }
 
 .tr-sens {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 6px;
   color: var(--text-3);
   cursor: pointer;
@@ -1010,6 +1061,9 @@ body.has-transient {
 
 .tr-info {
   margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-3);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -1181,11 +1235,14 @@ body.has-transient {
 }
 
 .tr-sens input {
-  width: 80px;
+  width: 60px;
 }
 
 .tr-loop,
+.tr-slices,
 .tr-detect {
+  flex: none;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1196,6 +1253,7 @@ body.has-transient {
 }
 
 .tr-loop input,
+.tr-slices input,
 .tr-detect input {
   width: 13px;
   height: 13px;
@@ -1250,6 +1308,19 @@ body.has-transient {
 .tr-move:hover {
   background: var(--surface-3);
   color: var(--accent-text);
+}
+
+/* Ctrl held: a click plays from that point, so nothing floating on the waveform takes it */
+.transient.is-seeking .tr-canvas {
+  cursor: crosshair !important;
+}
+
+.transient.is-seeking .tr-tools,
+.transient.is-seeking .tr-move,
+.transient.is-seeking .tr-merge,
+.transient.is-seeking .tr-group {
+  pointer-events: none;
+  opacity: 0.3;
 }
 
 /* recut from the transient marks: lit while the sections come from them */

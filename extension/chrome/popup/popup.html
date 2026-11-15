@@ -90,7 +90,7 @@
         <p id="pageFeedback" class="feedback msg" aria-live="polite" hidden></p>
       </section>
 
-      <section class="media">
+      <section class="media" hidden>
         <div class="section-head">
           <span class="overline">Mídias detectadas nesta página</span>
           <div class="section-tools">
@@ -104,8 +104,10 @@
         </div>
         <ul id="mediaList" class="media-list"></ul>
         <p id="mediaEmpty" class="empty meta">Nenhuma mídia detectada ainda. Dê play no vídeo e reabra.</p>
-        <div id="previewPop" class="preview-pop" aria-hidden="true"></div>
       </section>
+
+      <!-- outside the media section: it hides when the list is empty, and the page's own video previews here too -->
+      <div id="previewPop" class="preview-pop" aria-hidden="true"></div>
 
     </main>
   </body>

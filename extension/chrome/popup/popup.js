@@ -23,6 +23,7 @@ import { PREVIEW_RULE_ID, previewHeaderRule } from "../src/lib/previewrule.js";
 import { anyActive, awaitingListing, currentItem, downloadKey, downloadView, latestByUrl } from "../src/lib/progress.js";
 import { attachMse, dashPlan, parseHlsMaster, pickVariant } from "../src/lib/streams.js";
 import { WAVE_ICON, createTransientView, icon } from "./transient.js";
+import { makeTitleEditable } from "./editable-title.js";
 
 const $ = (id) => document.getElementById(id);
 const CLOSED_POLL_MS = 4000;
@@ -52,6 +53,7 @@ const state = {
   newestFirst: true,
   transient: null, // { rowId, view, host }: the card in transient mode
   restoreTransient: "", // row id whose transient view was open when the popup closed
+  pageName: "", // the name the user gave the page's media (empty: the tab's title), per URL for the session
 };
 
 async function message(type, extra = {}) {
@@ -246,7 +248,9 @@ function renderPage() {
   if (state.sendable) $("sendPage").dataset.url = url;
   const host = state.sendable ? hostLabel(url) : "Página do navegador";
   $("pageHost").textContent = host;
-  $("pageTitle").textContent = state.sendable ? tab.title || host : "Esta página não pode ser enviada ao Cachalot";
+  paintPageTitle();
+  pageTitleEdit.setEnabled(state.sendable);
+  paintAudioButton();
   const platform = state.sendable ? detectPlatform(url) : null;
   $("pagePlatform").hidden = !platform;
   if (platform) $("pagePlatform").textContent = platform.name;
@@ -268,6 +272,65 @@ function renderPage() {
   }
 }
 
+// ---- The page's name: a click renames what "Baixar" (and the transient view) saves ----------------
+
+const PAGE_NAME_KEY = "pageName:";
+
+function pageTitleText() {
+  const tab = state.tab;
+  if (!state.sendable) return "Esta página não pode ser enviada ao Cachalot";
+  return state.pageName || tab?.title || hostLabel(tab?.url || "");
+}
+
+function paintPageTitle() {
+  const node = $("pageTitle");
+  node.textContent = pageTitleText();
+  node.title = state.sendable ? `${node.textContent}\nClique para editar o nome` : "";
+}
+
+const pageTitleEdit = makeTitleEditable($("pageTitle"), {
+  label: "Nome da mídia (clique para editar)",
+  read: pageTitleText,
+  commit: (text) => setPageName(text),
+});
+
+/** The name the user typed for the page (null: back to the tab's title), kept while the browser is open. */
+function setPageName(text) {
+  state.pageName = text || "";
+  paintPageTitle();
+  if (!state.tab?.url) return;
+  const key = PAGE_NAME_KEY + state.tab.url;
+  (state.pageName ? chrome.storage.session.set({ [key]: state.pageName }) : chrome.storage.session.remove(key)).catch(() => {});
+}
+
+async function loadPageName() {
+  if (!state.tab?.url) return;
+  try {
+    const key = PAGE_NAME_KEY + state.tab.url;
+    state.pageName = (await chrome.storage.session.get(key))[key] || "";
+  } catch {
+    state.pageName = "";
+  }
+}
+
+// ---- "Só áudio" only where there is a video to take the audio from -------------------------------
+
+/** The page's media is sound only: a music site, or everything the page played is audio. */
+function pageIsAudio() {
+  const url = state.tab?.url || "";
+  if (!state.sendable || youtubeId(url)) return false;
+  if (isMusicPlatform(url)) return true;
+  const rows = state.sniffedRows;
+  return rows.length > 0 && rows.every((r) => r.kind === "audio" || r.audio);
+}
+
+function paintAudioButton() {
+  const audio = pageIsAudio();
+  $("sendAudio").hidden = audio;
+  document.querySelector(".actions").classList.toggle("is-audio", audio);
+  $("sendPage").title = audio ? "Baixar o áudio" : "";
+}
+
 function showPageFeedback(ok, text) {
   const p = $("pageFeedback");
   p.className = `feedback msg ${ok ? "msg-ok" : "msg-error"}`;
@@ -282,7 +345,7 @@ function showPageFeedback(ok, text) {
 async function sendPage(mode, button) {
   if (!state.tab || cancelFromButton(button)) return;
   setBusy(button, true, "Enviando");
-  const res = await message("sendPage", { tabId: state.tab.id, mode });
+  const res = await message("sendPage", { tabId: state.tab.id, mode: mode || (pageIsAudio() ? "audio" : null), title: state.pageName || null });
   setBusy(button, false);
   // Success needs no message: the "Baixar" button itself turns into "✓ Na fila" and follows the download.
   if (res.ok) {
@@ -1183,7 +1246,7 @@ function transientButton(row, host) {
 }
 
 function rowTitle(row) {
-  if (row.kind === "page") return state.tab?.title || row.url;
+  if (row.kind === "page") return state.pageName || state.tab?.title || row.url;
   const name = row.meta?.title || row.name || row.url;
   const artist = row.artist || row.meta?.artist;
   return artist ? `${artist} - ${name}` : name;
@@ -1192,7 +1255,7 @@ function rowTitle(row) {
 /** What Cachalot needs to fetch the row's audio: the page, a link the page shows, or a sniffed media (by id). */
 function transientRequest(row) {
   const tabId = state.tab.id;
-  if (row.kind === "page") return { tabId, url: state.tab.url, title: "" }; // Cachalot finds the real title
+  if (row.kind === "page") return { tabId, url: state.tab.url, title: state.pageName }; // empty: Cachalot finds the real title
   if (row.kind === "youtube" || row.kind === "track") return { tabId, url: row.url, title: rowTitle(row) };
   return { tabId, id: row.id, title: row.meta?.title ? rowTitle(row) : state.tab.title || "" };
 }
@@ -1206,8 +1269,10 @@ function openTransient(row, host) {
   const view = createTransientView({
     request: transientRequest(row),
     title: rowTitle(row),
+    titleEdited: row.kind === "page" && Boolean(state.pageName),
     message,
     onClose: () => closeTransient({ destroyed: true }),
+    onRename: row.kind === "page" ? (text) => setPageName(text) : null,
   });
   state.transient = { rowId: row.id, view, host };
   host.classList.add("is-transient");
@@ -1292,6 +1357,9 @@ function renderList({ fromScan = false } = {}) {
   $("sortOrder").hidden = rows.length < 2;
   $("mediaCount").hidden = rows.length === 0;
   $("mediaCount").textContent = String(rows.length);
+  // the section only shows when there is something in it
+  document.querySelector(".media").hidden = rows.length === 0;
+  paintAudioButton();
   const empty = $("mediaEmpty");
   empty.hidden = rows.length > 0;
   if (!state.sendable) empty.textContent = "Nada para baixar nesta página.";
@@ -1361,6 +1429,7 @@ async function init() {
   await Promise.all([loadSortOrder(), loadSent()]);
   $("extVersion").textContent = `v${chrome.runtime.getManifest().version}`;
   state.tab = await resolveTab();
+  await loadPageName();
   renderPage();
   await loadTransientRestore();
   const main = mainRow();
