@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ANALYSIS_RATE,
   TRANSIENT_GRID,
+  sliceUnit,
   addDivider,
   analyze,
   applyFades,
@@ -478,7 +479,7 @@ test("without the transient detection every cut sits exactly on the grid (Auto c
   for (const s of [0, 0.5, 1]) assert.deepEqual(detectCuts(analysis, { sensitivity: s, grid: "4", detect: false }), grid, "no sensitivity");
 });
 
-test("the transient recut puts one section between each pair of marks that pass the sensitivity", () => {
+test("the transient recut cuts from the marks, quantized to usable lengths on the tempo", () => {
   const onsets = [
     { time: 0.31, strength: 0.9, band: 0 },
     { time: 0.33, strength: 0.4, band: 2 }, // 20 ms after a stronger one: the same cut
@@ -487,12 +488,39 @@ test("the transient recut puts one section between each pair of marks that pass 
     { time: 2.45, strength: 0.7, band: 0 },
   ];
   const analysis = { onsets, duration: 4, beat: 0.5, bar: 2, origin: 0, bpm: 120, confidence: 1 };
-  assert.deepEqual(detectCuts(analysis, { sensitivity: 0.5, grid: TRANSIENT_GRID }), [0.31, 1.07, 2.45]);
-  // off the grid entirely: no bar line is a cut
-  assert.ok(!detectCuts(analysis, { sensitivity: 0.5, grid: TRANSIENT_GRID }).includes(2));
+  // 120 BPM: a 1/16 is 125 ms, too short, so the unit is 1/8 (250 ms); the marks go to 0.25, 1 and 2.5 and the
+  // 4 bars are halved around them: 1/8, 1/8, a beat, half a bar, a beat, a beat, then the empty bar 2 whole
+  assert.equal(sliceUnit(analysis), "8");
+  const cuts = detectCuts(analysis, { sensitivity: 0.5, grid: TRANSIENT_GRID });
+  assert.deepEqual(cuts, [0.25, 0.5, 1, 2, 2.5, 3]);
+  const edges = [0, ...cuts, 4];
+  for (let i = 0; i + 1 < edges.length; i++) {
+    const units = (edges[i + 1] - edges[i]) / 0.25;
+    assert.ok(Number.isInteger(Math.log2(units)), `section ${edges[i]}–${edges[i + 1]} is ${units} eighths`);
+    assert.ok(Number.isInteger(edges[i] / 0.25 / units), `section ${edges[i]} starts on a multiple of its length`);
+  }
   // without the detection it is the default division
   assert.deepEqual(
     detectCuts(analysis, { grid: TRANSIENT_GRID, detect: false }),
     detectCuts(analysis, { grid: "1", detect: false }),
   );
+});
+
+test("Auto and the recut only make sections of usable lengths (power-of-two units, on their own grid)", () => {
+  const loop = drumLoop();
+  const a = analyze(loop.samples);
+  const unit = gridStep(a, sliceUnit(a));
+  for (const grid of ["auto", TRANSIENT_GRID]) {
+    for (const sensitivity of [0.2, 0.5, 0.95]) {
+      const cuts = detectCuts(a, { sensitivity, grid });
+      const inside = cuts.filter((c) => c > a.origin - 0.02 && c < a.origin + 8 * a.bar - 0.05);
+      for (let i = 0; i + 1 < inside.length; i++) {
+        const units = Math.round((inside[i + 1] - inside[i]) / unit);
+        assert.ok(units >= 1 && Number.isInteger(Math.log2(units)), `${grid} @${sensitivity}: a section of ${units} units`);
+        const at = Math.round((inside[i] - a.origin) / unit);
+        assert.ok(at % units === 0, `${grid} @${sensitivity}: a section of ${units} units starts at unit ${at}`);
+      }
+    }
+  }
+  assert.ok(unit >= 0.15, `the unit is ${unit} s`);
 });

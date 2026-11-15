@@ -466,6 +466,18 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     meta_video = popup.locator(row_css(VIDEO) + " .media-meta").inner_text()
     c("popup: video row shows the size", "KB" in meta_video or "MB" in meta_video, meta_video)
     c("popup: page title shown", text("#pageTitle") == PAGE_TITLE, text("#pageTitle"))
+    c("popup: media section shown when there is media", popup.locator("section.media").is_visible())
+    # a click renames the page's media in place (same font); emptied, it goes back to the tab's title
+    font = popup.eval_on_selector("#pageTitle", "e => getComputedStyle(e).font")
+    popup.click("#pageTitle")
+    popup.keyboard.type("Nome novo")
+    popup.keyboard.press("Enter")
+    c("popup: the page name is editable with a click", text("#pageTitle") == "Nome novo"
+      and popup.eval_on_selector("#pageTitle", "e => getComputedStyle(e).font") == font, text("#pageTitle"))
+    popup.click("#pageTitle")
+    popup.keyboard.press("Delete")
+    popup.keyboard.press("Enter")
+    c("popup: an emptied name goes back to the tab's title", text("#pageTitle") == PAGE_TITLE, text("#pageTitle"))
     c("popup: no cookie switch (cookies are chosen in Cachalot's settings)",
       popup.locator("#cookieSwitch").count() == 0 and popup.locator(".cookies").count() == 0)
 
@@ -818,7 +830,8 @@ def _scenario(ctx, checks, screens, work, clip_size, song_size, cert, mock, page
     open_popup(f"chrome-extension://{ext_id}/popup/popup.html?tab={options_tab}")
     c("unsupported page: explained", "não pode ser enviada" in text("#pageTitle"), text("#pageTitle"))
     c("unsupported page: buttons disabled", popup.locator("#sendPage").is_disabled() and popup.locator("#sendAudio").is_disabled())
-    c("unsupported page: nothing-to-download text", text("#mediaEmpty") == "Nada para baixar nesta página.", text("#mediaEmpty"))
+    c("unsupported page: no media section (it only shows with media)", popup.locator("section.media").is_hidden())
+    c("unsupported page: the name is not editable", "is-locked" in (popup.get_attribute("#pageTitle", "class") or ""))
     shot(popup, "09-unsupported.png")
 
     # 12. YouTube: the page's own video is previewed in the page card (never listed);
@@ -944,20 +957,77 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
     c("transient: tempo detected (120 BPM)", any(f"{b} BPM" in info for b in (119, 120, 121)), info)
     shot(popup, "05a-transient.png")
     c("transient: a new song opens on 1:1", popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true")
-    # "Auto-detect transient", right of Loop: always off at first; off, every cut sits exactly on the tempo's grid
+    # "Transient detection", right of Loop: always off at first; off, every cut sits exactly on the tempo's grid
     det = ".tr-controls-top > .tr-detect input[type=checkbox]"
-    c("transient: Auto-detect transient checkbox right of Loop, off", popup.locator(det).count() == 1
-      and not popup.locator(det).is_checked() and "Auto-detect transient" in popup.locator(".tr-detect").inner_text()
+    c("transient: Transient detection checkbox right of Loop, off", popup.locator(det).count() == 1
+      and not popup.locator(det).is_checked() and "Transient detection" in popup.locator(".tr-detect").inner_text()
       and popup.eval_on_selector(".tr-detect", "e => e.getBoundingClientRect().left")
       > popup.eval_on_selector(".tr-loop", "e => e.getBoundingClientRect().right"))
-    c("transient: without the detection the sensitivity is off", popup.locator(".tr-sens input").is_disabled())
+    c("transient: without the detection the sensitivity and the recut are hidden",
+      popup.locator(".tr-sens").is_hidden() and popup.locator(".tr-recut").is_hidden())
+    left = lambda sel: popup.eval_on_selector(sel, "e => e.getBoundingClientRect().left")
+    right = lambda sel: popup.eval_on_selector(sel, "e => e.getBoundingClientRect().right")
+    c("transient: Show slices right of Loop (on), the sensitivity right after the recut button",
+      popup.locator(".tr-slices input").is_checked() and left(".tr-slices") > right(".tr-loop")
+      and popup.locator(".tr-controls-top > .tr-recut + .tr-sens").count() == 1)
+    # renaming the song in the view
+    popup.click(".tr-title")
+    popup.keyboard.type("Outro nome")
+    popup.keyboard.press("Enter")
+    c("transient: the song's name is editable with a click", popup.locator(".tr-title").inner_text() == "Outro nome",
+      popup.locator(".tr-title").inner_text())
+    popup.click(".tr-title")
+    popup.keyboard.press("Delete")
+    popup.keyboard.press("Enter")
+    c("transient: emptied, the name goes back to Cachalot's", popup.locator(".tr-title").inner_text() == "Loop de teste",
+      popup.locator(".tr-title").inner_text())
+    # Ctrl + click: the song plays from exactly the point clicked
+    cb = popup.locator(".tr-canvas").bounding_box()
+    dur = float(ds("duration"))
+    before_seek = dividers_now()
+    # right on the middle of the song: a divider sits there, with its merge button; with Ctrl it plays, not merges
+    popup.mouse.move(cb["x"] + cb["width"] * 0.5, cb["y"] + cb["height"] / 2)
+    popup.keyboard.down("Control")
+    popup.mouse.move(cb["x"] + cb["width"] * 0.5 + 1, cb["y"] + cb["height"] / 2)
+    popup.mouse.click(cb["x"] + cb["width"] * 0.5, cb["y"] + cb["height"] / 2)
+    popup.keyboard.up("Control")
+    popup.wait_for_timeout(150)
+    pr = ds("playRange") or ""
+    c("transient: Ctrl+click plays the whole song from the point clicked", pr == f"0,{dur}" or pr.startswith("0,"), pr)
+    popup.locator(".tr-play").click()  # pause
+    paused = float(ds("paused") or -1)
+    c("transient: ...from about the middle, nothing merged", abs(paused - dur * 0.5) < 1.5 and dividers_now() == before_seek,
+      f"{paused} {dur}")
+    # Show slices off: no sections over the waveform, any click plays the song from there, on to its end
+    popup.locator(".tr-slices").click()
+    c("transient: Show slices off hides the sections", "is-sliceless" in (popup.get_attribute(view, "class") or ""))
+    popup.mouse.click(cb["x"] + cb["width"] * 0.25, cb["y"] + cb["height"] / 2)
+    popup.wait_for_timeout(150)
+    c("transient: with the slices hidden a click plays the whole song", (ds("playRange") or "").startswith("0,")
+      and float((ds("playRange") or "0,0").split(",")[1]) == dur, ds("playRange"))
+    popup.locator(".tr-play").click()
+    popup.locator(".tr-slices").click()
+    c("transient: Show slices back on", popup.locator(".tr-slices input").is_checked()
+      and "is-sliceless" not in (popup.get_attribute(view, "class") or ""))
+    # leave nothing playing or paused: a click plays a section (clearing the pause), a second one stops it
+    vs0, ve0 = map(float, ds("view").split(","))
+    d0 = dividers_now()
+    k0 = max(range(len(d0) - 1), key=lambda k: d0[k + 1] - d0[k])  # the widest section, clicked in its middle
+    x0 = cb["x"] + ((d0[k0] + d0[k0 + 1]) / 2 - vs0) / (ve0 - vs0) * cb["width"]
+    for _ in range(2):
+        popup.mouse.click(x0, cb["y"] + cb["height"] / 2)
+        popup.wait_for_timeout(700)
+    c("transient: nothing playing or paused after the seek checks", not ds("playing") and not ds("paused"),
+      f"{ds('playing')} {ds('paused')}")
+    popup.evaluate("() => document.activeElement && document.activeElement.blur()")
     inner = dividers_now()[1:-1]
     gaps = [b - a for a, b in zip(inner, inner[1:])]
     c("transient: without the detection 1:1 cuts exactly on the grid (equal bars)",
       len(gaps) >= 6 and max(gaps) - min(gaps) < 3e-4, str(gaps))
     popup.locator(".tr-grid-btn:text-is('Auto')").click()
-    c("transient: picking Auto turns the detection on", popup.locator(det).is_checked()
-      and not popup.locator(".tr-sens input").is_disabled())
+    c("transient: picking Auto turns the detection on, the sensitivity and the recut show up", popup.locator(det).is_checked()
+      and popup.locator(".tr-sens input").is_visible() and popup.locator(".tr-recut").is_visible()
+      and left(".tr-sens") > right(".tr-recut"))
     popup.locator(".tr-detect").click()
     c("transient: turning it off on Auto goes back to 1:1", not popup.locator(det).is_checked()
       and popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true")
@@ -1388,7 +1458,7 @@ def _transient(c, popup, open_popup, row_css, AUDIO, count, wait_request, shot):
 
     open_popup()
     popup.wait_for_selector(".transient.is-ready", timeout=15000)
-    c("transient: reopened, Auto-detect transient is off again", not popup.locator(det).is_checked())
+    c("transient: reopened, Transient detection is off again", not popup.locator(det).is_checked())
     popup.locator(".tr-detect").click()
     c("transient: reopening the popup brings the view back with its edits",
       ds("dividers") == kept and int(ds("active")) == int(ds("sections")) - 1 and ds("fades") == kept_fades,
@@ -1409,9 +1479,9 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
     """The recut from the transient marks, the tempo typed by hand and moving a section (detection on, at first)."""
     close = lambda a, b, tol=2e-3: len(a) == len(b) and all(abs(x - y) < tol for x, y in zip(a, b))  # noqa: E731
 
-    # recalcular: right of "Auto-detect transient", only with it on; one section per transient mark; Ctrl+Z undoes it
+    # recalcular: right of "Transient detection", only with it on; one section per transient mark; Ctrl+Z undoes it
     recut = ".tr-controls-top > .tr-detect + .tr-recut"
-    c("transient: recut button (icon) right of Auto-detect transient, enabled with the detection",
+    c("transient: recut button (icon) right of Transient detection, enabled with the detection",
       popup.locator(recut).count() == 1 and popup.locator(recut).is_enabled() and popup.locator(recut + " svg").count() == 1)
     pick_grid("1:4")
     before = ds("dividers")
@@ -1426,7 +1496,7 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
     popup.locator(".tr-detect").click()
     c("transient: turning the detection off goes back to the default division (1:1), recut off",
       not popup.locator(det).is_checked() and popup.get_attribute(".tr-grid-btn:text-is('1:1')", "aria-pressed") == "true"
-      and popup.locator(recut).is_disabled())
+      and popup.locator(recut).is_hidden())
 
     # the tempo: a click types it, the grid is redone on it; empty goes back to the detected one
     def gaps():
@@ -1515,11 +1585,11 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
              if d[k] >= vs and d[k + 3] <= ve and all(abs(d[k + m + 1] - d[k + m] - 2) < 2e-3 for m in range(3))
              and not {k, k + 1, k + 2} & set(json.loads(ds("disabled"))))
 
-    def ctrl_click(*indexes):
-        popup.keyboard.down("Control")
+    def shift_click(*indexes):
+        popup.keyboard.down("Shift")
         for k in indexes:
             popup.mouse.click(vx((d[k] + d[k + 1]) / 2), y)
-        popup.keyboard.up("Control")
+        popup.keyboard.up("Shift")
         popup.wait_for_timeout(100)
 
     def select(*indexes):
@@ -1528,12 +1598,12 @@ def _transient_tools(c, popup, ds, dividers_now, pick_grid, det):
             popup.wait_for_timeout(400)
             if "is-playing" in (popup.get_attribute(".tr-play", "class") or ""):
                 popup.locator(".tr-play").click()
-        ctrl_click(*indexes)
+        shift_click(*indexes)
 
     select(j, j + 2)
     c("transient: no group button for sections that are not in a row",
       int(ds("selected")) == 2 and popup.locator(".tr-group").is_hidden(), ds("selected"))
-    ctrl_click(j + 1)
+    shift_click(j + 1)
     gb = popup.locator(".tr-group").bounding_box() if popup.locator(".tr-group").is_visible() else None
     mid = (vx(d[j]) + vx(d[j + 3])) / 2
     c("transient: three sections in a row selected: the group button sits in the middle of them",

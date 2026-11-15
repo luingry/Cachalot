@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,16 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.5.0",
+      "notes": [
+        "Transient mode: Auto and the recut button now cut into usable lengths on the song's tempo: every section is 4, 2 or 1 bars, half a bar, a beat or an eighth, starting on its own grid (never 3/16 of a bar).",
+        "Transient mode: hold Ctrl and click anywhere on the waveform to play from exactly that point.",
+        "Transient mode: new \"Show slices\" switch next to Loop; off, the waveform shows just the song and playback runs through all of it. \"Auto-detect transient\" is now \"Transient detection\", and the sensitivity and the recut button only show while it is on.",
+        "Click the song's name, in the popup or in transient mode, to rename it: the download is saved with the new name.",
+        "The extension popup only shows \"Só áudio\" when the media is a video, and the detected media list only when there is something in it."
+      ]
+    },
     {
       "version": "2.4.0",
       "notes": [

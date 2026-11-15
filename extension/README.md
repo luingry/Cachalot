@@ -55,21 +55,25 @@ mais nova).
     downloads) e o popup acha os **transientes** — ataques separados por timbre (graves, médios, agudos, cada faixa com
     o seu peso) — e o **andamento** (BPM e compassos) e marca as divisões na própria waveform. O BPM é o que se
     conta, entre 90 e 180 como num software de DJ (um groove meio-tempo a 138 é 138, não 69). Controles pequenos no
-    topo, em tempo real: na primeira linha **Sensibilidade**, **Loop** e **Auto-detect transient**; embaixo, todas as
+    topo, em tempo real: na primeira linha **Loop**, **Show slices**, **Transient detection** e, com ele marcado, o
+    ↻ e a **Sensibilidade**; embaixo, todas as
     divisões numa linha só, da maior para a menor — **32:1, 16:1, 8:1, 4:1, 2:1** (32 a 2 compassos por seção),
     **1:1** (o padrão de toda música nova), **1:2 … 1:64** e **Auto**. A música inteira é marcada em **compassos**
     numa grade como a de um CDJ: compasso 1 e o BPM exato (ajustado no grave da música inteira), cada tempo no mesmo
     espaçamento do começo ao fim, sem acumular erro; numa música de andamento variável (banda sem click) a grade
     acompanha, uma reta a cada 4 compassos. A divisão escolhida deixa cada seção desse tamanho.
-    - **Auto-detect transient** começa sempre desmarcado: cada seção fica exatamente na grade. Marcado, o corte vai
+    - **Transient detection** começa sempre desmarcado: cada seção fica exatamente na grade. Marcado, o corte vai
       para o ataque do próprio tempo (o golpe mais forte a até 15 ms da linha, ou um bumbo/baixo até 30 ms adiantado;
       clap, shaker ou chimbal tocados à frente de propósito não puxam o corte), as marcas dos transientes aparecem
-      sob a waveform, a **Sensibilidade** vale (à esquerda só os transientes fortes, à direita também os fracos) e
-      **Auto** fica disponível: corta em todo começo de compasso e, dentro dele, em cada 1/16 onde um transiente é
-      tocado (sem pulso estável, em cada transiente). Escolher Auto marca a caixa; desmarcá-la volta sempre à divisão
-      padrão (1:1).
-    - **Recalcular** (ícone ↻ ao lado do Auto-detect transient, só com ele marcado): refaz as seções a partir das
-      marcas dos transientes, uma seção de cada marca até a seguinte, na sensibilidade escolhida; as divisórias
+      sob a waveform, a **Sensibilidade** aparece (à esquerda só os transientes fortes, à direita também os fracos) e
+      **Auto** fica disponível: todo compasso começa uma seção, dividida ao meio (meio compasso, tempo, colcheia…)
+      onde há transientes tocados, então toda seção tem um tamanho utilizável no BPM (quantizada: nunca 3/16 de
+      compasso). A menor divisão é a primeira entre 1/16, 1/8 e um tempo que dure pelo menos 150 ms (a 120 BPM,
+      1/8). Escolher Auto marca a caixa; desmarcá-la volta sempre à divisão padrão (1:1) e esconde o ↻ e a
+      Sensibilidade.
+    - **Recalcular** (ícone ↻ ao lado do Transient detection, só com ele marcado): refaz as seções a partir das
+      marcas dos transientes na sensibilidade escolhida, quantizadas do mesmo jeito que o Auto, em blocos de até 4
+      compassos (um trecho sem marcas vira uma seção de 4, 2 ou 1 compasso); as divisórias
       editadas saem (os cortes do começo/fim e o compasso 1 ficam). Fica aceso enquanto vale; escolher uma divisão
       volta à grade, e Ctrl+Z desfaz tudo, inclusive a divisão.
     - **BPM manual**: clique no BPM (à direita, na linha de cima) e digite o andamento certo (vírgula ou ponto,
@@ -101,7 +105,7 @@ mais nova).
       salva um arquivo por seção, na pasta de downloads.
     - **Arrastar a seção** (botão logo acima desses, centralizado): move a seção pela música sem mudar o tamanho.
       O espaço que ela deixa vira uma seção nova, desativada; a seção onde ela entra (ativa ou não) cede o tamanho,
-      e some se ficar toda por baixo. O começo ou o fim grudam na grade da divisão escolhida e, com o Auto-detect
+      e some se ficar toda por baixo. O começo ou o fim grudam na grade da divisão escolhida e, com o Transient detection
       transient marcado, nas marcas dos transientes (Alt solta); perto de outra divisória, encaixa nela.
     - **Fade-in e fade-out** por seção: com o ponteiro na seção aparecem, nas bordas de cima, um quadrado em cada
       ponta — arraste para dentro para o comprimento do fade — e, quando há fade, um ponto sobre a curva: para cima

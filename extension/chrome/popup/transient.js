@@ -10,6 +10,7 @@
 // section, one file each (MP3, WAV or FLAC, asked unless remembered), in a
 // new folder.
 
+import { makeTitleEditable } from "./editable-title.js";
 import { createBridgeClient, describeBridgeError } from "../src/lib/bridge.js";
 import {
   ANALYSIS_RATE,
@@ -100,7 +101,7 @@ const GRID_TITLES = {
 const RULER_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 const ORIGIN_TITLE = "Compasso 1: fica no começo do áudio; arraste para marcar onde a música começa e as seções andam junto · Alt solta do transiente · duplo clique volta ao começo";
 const HINT =
-  "Arraste a bandeira azul na régua para marcar o compasso 1 · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Ctrl+Z desfaz";
+  "Arraste a bandeira azul na régua para marcar o compasso 1 · Perto de uma divisória, ⇥⇤ junta as duas seções · Role para zoom · arraste para selecionar (Ctrl/Shift soma) · botão direito ou do meio arrasta a vista · arraste as divisórias · nas bordas da seção, fade-in/out (alça ■ comprimento, ● curva) · duplo clique cria ou remove · clique ouve · Ctrl+clique toca dali · Ctrl+Z desfaz";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const ICONS = {
@@ -178,20 +179,22 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  * }
  * Returns { node, destroy }.
  */
-export function createTransientView({ request, title, message, onClose }) {
+export function createTransientView({ request, title, titleEdited = false, message, onClose, onRename }) {
   const bridge = createBridgeClient({ storage: chrome.storage.local });
   const v = {
     alive: true,
     jobId: "",
     title: title || "",
+    titleEdited, // renamed by the user: Cachalot's title no longer replaces it
     samples: null,
     peaks: null,
     gain: 1,
     analysis: null, // what the view uses: the detected analysis, at the user's tempo when one was typed
     detected: null, // the analysis as found
     bpm: null, // the tempo the user typed (null: the detected one), per song
-    settings: { sensitivity: DEFAULT_SENSITIVITY, grid: "1", loop: false, detect: false }, // grid: per song, a new one
-    // opens on 1:1; detect ("Auto-detect transient") always starts off: the cuts sit exactly on the tempo's grid
+    settings: { sensitivity: DEFAULT_SENSITIVITY, grid: "1", loop: false, detect: false, slices: true }, // grid: per song, a new one
+    // opens on 1:1; detect ("Transient detection") always starts off: the cuts sit exactly on the tempo's grid;
+    // slices ("Show slices") always starts on: off, the waveform is the plain song and playback runs through all of it
     edits: emptyEdits(),
     disabled: new Set(),
     cuts: [],
@@ -225,6 +228,16 @@ export function createTransientView({ request, title, message, onClose }) {
   const node = el("div", "transient");
   const head = el("div", "tr-head");
   const titleEl = el("div", "tr-title", v.title);
+  const original = { title: v.title }; // what an emptied name goes back to (Cachalot's title once it arrives)
+  makeTitleEditable(titleEl, {
+    label: "Nome da música (clique para editar)",
+    read: () => v.title,
+    commit: (text) => {
+      v.titleEdited = text != null;
+      setTitle(text ?? original.title);
+      onRename?.(text);
+    },
+  });
   const headTools = el("div", "tr-head-tools");
   const allBtn = el("button", "btn btn-primary btn-sm tr-all");
   allBtn.type = "button";
@@ -285,18 +298,24 @@ export function createTransientView({ request, title, message, onClose }) {
   const loopInput = el("input");
   loopInput.type = "checkbox";
   loop.append(loopInput, el("span", "", "Loop"));
+  // on: the sections over the waveform (bands, dividers, tools); off: the plain song, played from end to end
+  const slices = el("label", "tr-slices");
+  slices.title = "Show slices: mostra os trechos sobre a waveform. Desmarcado: só a música, e o play segue pela música inteira";
+  const slicesInput = el("input");
+  slicesInput.type = "checkbox";
+  slices.append(slicesInput, el("span", "", "Show slices"));
   // off: every section exactly on the grid built on the tempo; on: the detection (Auto, sensitivity, cuts on attacks)
   const detect = el("label", "tr-detect");
   detect.title =
-    "Auto-detect transient: os cortes se ajustam aos transientes detectados (Auto, sensibilidade, corte no ataque). Desmarcado: cada trecho exatamente na grade do BPM";
+    "Transient detection: os cortes se ajustam aos transientes detectados (Auto, sensibilidade, corte no ataque). Desmarcado: cada trecho exatamente na grade do BPM";
   const detectInput = el("input");
   detectInput.type = "checkbox";
-  detect.append(detectInput, el("span", "", "Auto-detect transient"));
+  detect.append(detectInput, el("span", "", "Transient detection"));
   // one section from each transient mark to the next (the marks under the waveform, at this sensitivity)
-  const recutBtn = iconButton(ICONS.recut, "Recalcular os trechos pelas marcações de transientes", "tr-recut");
+  const recutBtn = iconButton(ICONS.recut, "Recalcular os trechos pelas marcações de transientes, quantizados pelo BPM", "tr-recut");
   recutBtn.disabled = true;
   const top = el("div", "tr-controls-top");
-  top.append(sens, loop, detect, recutBtn, info);
+  top.append(loop, slices, detect, recutBtn, sens, info);
   controls.append(top, grid);
 
   const wave = el("div", "tr-wave");
@@ -386,7 +405,10 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function follow(state) {
     v.jobId = state.id || v.jobId;
-    if (state.title) setTitle(state.title);
+    if (state.title) {
+      original.title = state.title;
+      if (!v.titleEdited) setTitle(state.title);
+    }
     if (state.state === "erro") return showOverlay(state.error || "Não foi possível preparar o áudio.", { error: true });
     if (state.state === "pronto") return loadAudio(state);
     const pct = Number(state.progress) || 0;
@@ -491,15 +513,17 @@ export function createTransientView({ request, title, message, onClose }) {
 
   function paintControls() {
     loopInput.checked = v.settings.loop;
+    slicesInput.checked = v.settings.slices;
+    node.classList.toggle("is-sliceless", !v.settings.slices);
     detectInput.checked = v.settings.detect;
-    // the sensitivity only steers the detection
+    // the sensitivity and the recut only exist with the detection: hidden without it
+    sens.hidden = !v.settings.detect;
+    recutBtn.hidden = !v.settings.detect;
     sensInput.disabled = !v.settings.detect;
-    sens.classList.toggle("is-off", !v.settings.detect);
     recutBtn.disabled = !v.settings.detect;
     recutBtn.setAttribute("aria-pressed", String(v.settings.grid === TRANSIENT_GRID));
-    recutBtn.title = v.settings.detect
-      ? "Recalcular os trechos pelas marcações de transientes (desfaz as divisórias editadas · Ctrl+Z volta)"
-      : "Recalcular os trechos pelas marcações de transientes (ligue o Auto-detect transient)";
+    recutBtn.title =
+      "Recalcular os trechos pelas marcações de transientes, quantizados em tamanhos de compasso pelo BPM (desfaz as divisórias editadas · Ctrl+Z volta)";
     const s = Math.round(v.settings.sensitivity * 100);
     sensInput.value = String(s);
     sensValue.textContent = String(s);
@@ -661,7 +685,7 @@ export function createTransientView({ request, title, message, onClose }) {
   function setTitle(text) {
     v.title = text;
     titleEl.textContent = text;
-    titleEl.title = text;
+    titleEl.title = `${text}\nClique para editar o nome`;
   }
 
   /** Dividers and sections as drawn: a divider being dragged sits where the pointer is. */
@@ -738,7 +762,9 @@ export function createTransientView({ request, title, message, onClose }) {
     const bottom = h - LANE_BOTTOM;
     const waveH = bottom - top;
     const mid = top + waveH / 2;
-    const { dividers, sections } = layout();
+    const showSlices = v.settings.slices;
+    // with the slices hidden the waveform is the plain song: no bands, dividers, fades or dimmed sections
+    const { dividers, sections } = showSlices ? layout() : { dividers: [], sections: [] };
 
     // section bands
     sections.forEach((s, i) => {
@@ -773,7 +799,7 @@ export function createTransientView({ request, title, message, onClose }) {
         ctx.fillRect(x0, top, x1 - x0, waveH);
       }
     });
-    if (v.press?.mode === "select" && v.press.moved) {
+    if (showSlices && v.press?.mode === "select" && v.press.moved) {
       // the band being dragged
       const a = clamp(xOf(Math.min(v.press.t0, v.press.t1)), 0, w);
       const b = clamp(xOf(Math.max(v.press.t0, v.press.t1)), 0, w);
@@ -843,7 +869,7 @@ export function createTransientView({ request, title, message, onClose }) {
       const hi = peaks[2 * x + 1] * g;
       const y1 = mid - hi * amp;
       const y2 = mid - lo * amp;
-      (inside && !v.disabled.has(s.key) ? on : offPath).rect(x, y1, 1, Math.max(1, y2 - y1));
+      (!showSlices || (inside && !v.disabled.has(s.key)) ? on : offPath).rect(x, y1, 1, Math.max(1, y2 - y1));
     }
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = colors.waveOff;
@@ -1308,9 +1334,10 @@ export function createTransientView({ request, title, message, onClose }) {
   function refreshHover() {
     if (v.pointerX < 0 || v.drag || v.shift || v.press || v.fadeDrag || v.originDrag || !v.analysis) return;
     const origin = originHandleAt(v.pointerX, v.pointerY);
-    const fade = origin ? null : fadeHandleAt(v.pointerX, v.pointerY);
-    const divider = fade || origin ? -1 : dividerAt(v.pointerX);
-    const section = fade ? fade.index : divider >= 0 || origin ? -1 : sectionAt(v.pointerX);
+    const slicesOn = v.settings.slices; // hidden slices: nothing to hover but the flag
+    const fade = origin || !slicesOn ? null : fadeHandleAt(v.pointerX, v.pointerY);
+    const divider = fade || origin || !slicesOn ? -1 : dividerAt(v.pointerX);
+    const section = fade ? fade.index : divider >= 0 || origin || !slicesOn ? -1 : sectionAt(v.pointerX);
     const fadeId = (f) => (f ? `${f.key}:${f.which}:${f.part}` : "");
     if (divider !== v.hover.divider || section !== v.hover.section || fadeId(fade) !== fadeId(v.hover.fade) || origin !== Boolean(v.hover.origin)) {
       v.hover = { divider, section, fade, origin };
@@ -1319,7 +1346,7 @@ export function createTransientView({ request, title, message, onClose }) {
     canvas.style.cursor = origin || (fade && fade.part === "len") || divider >= 0 ? "ew-resize" : fade ? "ns-resize" : "pointer";
     canvas.title = origin ? ORIGIN_TITLE : "";
     placeTools();
-    placeMerge(fade || origin ? -1 : mergeCandidate(v.pointerX));
+    placeMerge(fade || origin || !slicesOn ? -1 : mergeCandidate(v.pointerX));
   }
 
   const MERGE_NEAR_PX = 16;
@@ -1397,7 +1424,7 @@ export function createTransientView({ request, title, message, onClose }) {
 
   /** The selected sections when they are two or more in a row (indexes first … last), else null. */
   function groupRange() {
-    if (v.selected.size < 2) return null;
+    if (v.selected.size < 2 || !v.settings.slices) return null;
     const idx = v.sections.flatMap((x, i) => (v.selected.has(x.key) ? [i] : []));
     if (idx.length < 2 || idx[idx.length - 1] - idx[0] !== idx.length - 1) return null;
     return { first: idx[0], last: idx[idx.length - 1] };
@@ -1729,26 +1756,31 @@ export function createTransientView({ request, title, message, onClose }) {
       v.press = { mode: "pan", x, start: v.start, end: v.end, moved: false };
       return;
     }
-    if (e.button === 0 && originHandleAt(x, y)) {
+    // Ctrl + click plays from exactly that point, wherever it lands (a divider, a fade handle, the flag)
+    const seek = e.ctrlKey || e.metaKey;
+    if (!seek && originHandleAt(x, y)) {
       const at = flagTime();
       v.originDrag = { time: at, grab: x - xOf(at), moved: false }; // keeps where the flag was grabbed
       canvas.style.cursor = "ew-resize";
       return;
     }
-    const fade = fadeHandleAt(x, y);
-    if (fade) {
-      const f = v.fades[fade.key] || emptyFade();
-      v.fadeDrag = { ...fade, y0: y, curve0: fade.which === "in" ? f.inCurve : f.outCurve, before: snapshot(), changed: false };
-      return;
+    if (!seek && v.settings.slices) {
+      const fade = fadeHandleAt(x, y);
+      if (fade) {
+        const f = v.fades[fade.key] || emptyFade();
+        v.fadeDrag = { ...fade, y0: y, curve0: fade.which === "in" ? f.inCurve : f.outCurve, before: snapshot(), changed: false };
+        return;
+      }
+      const di = dividerAt(x);
+      if (di >= 0) {
+        v.drag = { index: di, divider: v.dividers[di], time: v.dividers[di].time, moved: false };
+        canvas.style.cursor = "ew-resize";
+        return;
+      }
     }
-    const di = dividerAt(x);
-    if (di >= 0) {
-      v.drag = { index: di, divider: v.dividers[di], time: v.dividers[di].time, moved: false };
-      canvas.style.cursor = "ew-resize";
-    } else {
-      const add = e.ctrlKey || e.metaKey || e.shiftKey;
-      v.press = { mode: "select", x, t0: tOf(x), t1: tOf(x), add, base: add ? new Set(v.selected) : new Set(), moved: false };
-    }
+    // a drag selects (Ctrl/Shift adds); a click plays: Ctrl, or the slices hidden, from the point clicked
+    const add = seek || e.shiftKey;
+    v.press = { mode: "select", x, t0: tOf(x), t1: tOf(x), add, seek, base: add ? new Set(v.selected) : new Set(), moved: false };
   });
 
   canvas.addEventListener("pointermove", (e) => {
@@ -1800,6 +1832,7 @@ export function createTransientView({ request, title, message, onClose }) {
         setView(v.press.start + shift, v.press.end + shift);
         return;
       }
+      if (!v.settings.slices) return; // nothing to select
       v.press.t1 = clamp(tOf(v.pointerX), 0, v.analysis.duration);
       v.selected = new Set([...v.press.base, ...keysBetween(v.press.t0, v.press.t1)]);
       updateInfo();
@@ -1858,13 +1891,15 @@ export function createTransientView({ request, title, message, onClose }) {
         draw();
       }
     } else if (v.press) {
-      const { moved, x, mode, add } = v.press;
+      const { moved, x, mode, add, seek } = v.press;
       v.press = null;
       if (!moved && !cancelled && mode === "select") {
         const section = sectionAt(x);
         clearTimeout(v.clickTimer);
-        if (add) {
-          // Ctrl/Shift + click: the section joins or leaves the selection
+        if (seek || !v.settings.slices) {
+          playFrom(tOf(x));
+        } else if (add) {
+          // Shift + click: the section joins or leaves the selection
           const key = v.sections[section]?.key;
           if (key !== undefined && !v.selected.delete(key)) v.selected.add(key);
         } else {
@@ -1906,6 +1941,7 @@ export function createTransientView({ request, title, message, onClose }) {
   canvas.addEventListener("dblclick", (e) => {
     if (!v.analysis) return;
     clearTimeout(v.clickTimer);
+    if (e.ctrlKey || e.metaKey) return; // two Ctrl+clicks: two seeks, not a new divider
     const x = localX(e);
     if (originHandleAt(x, localY(e))) {
       // back to where the analysis found the start
@@ -1917,6 +1953,7 @@ export function createTransientView({ request, title, message, onClose }) {
       }
       return;
     }
+    if (!v.settings.slices) return; // no dividers to add or remove while they are hidden
     const fade = fadeHandleAt(x, localY(e));
     if (fade) {
       // length handle: no fade; curve dot: back to linear
@@ -2120,14 +2157,14 @@ export function createTransientView({ request, title, message, onClose }) {
     }
     if (!v.analysis || !(e.ctrlKey || e.metaKey) || e.altKey) return;
     const key = e.key.toLowerCase();
-    if (key === "a") {
+    if (key === "a" && v.settings.slices) {
       v.selected = new Set(v.sections.map((x) => x.key));
       updateInfo();
       draw();
       e.preventDefault();
       return;
     }
-    if (key === "g" && !e.shiftKey) {
+    if (key === "g" && !e.shiftKey && v.settings.slices) {
       e.preventDefault();
       group();
       return;
@@ -2138,6 +2175,17 @@ export function createTransientView({ request, title, message, onClose }) {
     e.preventDefault();
   }
   document.addEventListener("keydown", onKey);
+
+  // Ctrl held: the waveform plays from wherever it is clicked, so the buttons floating on it step aside
+  const seeking = (on) => node.classList.toggle("is-seeking", Boolean(on));
+  const onModifier = (e) => {
+    if (e.key === "Control" || e.key === "Meta") seeking(e.type === "keydown");
+  };
+  const onBlurWindow = () => seeking(false);
+  document.addEventListener("keydown", onModifier);
+  document.addEventListener("keyup", onModifier);
+  window.addEventListener("blur", onBlurWindow);
+  wave.addEventListener("pointermove", (e) => seeking(e.ctrlKey || e.metaKey));
 
   toolDownload.addEventListener("click", () => {
     // one file per section, numbered by its place in the song
@@ -2289,15 +2337,24 @@ export function createTransientView({ request, title, message, onClose }) {
     if (v.paused) {
       const q = v.paused;
       v.paused = null;
-      playRange(q.index, q.start, q.end, Math.min(q.at, q.end - 0.005), q.section);
+      if (!v.settings.slices) playFrom(q.at); // the slices hidden: on through the whole song
+      else playRange(q.index, q.start, q.end, Math.min(q.at, q.end - 0.005), q.section);
       return;
     }
-    const picked = v.sections.filter((x) => v.selected.has(x.key));
+    const picked = v.settings.slices ? v.sections.filter((x) => v.selected.has(x.key)) : [];
     if (picked.length) playRange(-1, picked[0].start, picked[picked.length - 1].end);
     else playRange(-1, 0, v.analysis.duration);
   }
 
   playBtn.addEventListener("click", playPause);
+
+  /** The whole song from `t` (Ctrl + click, or any click with the slices hidden); Loop goes round the song. */
+  function playFrom(t) {
+    const end = v.analysis.duration;
+    v.paused = null;
+    stopPlay();
+    playRange(-1, 0, end, clamp(t, 0, end - 0.005));
+  }
 
   function togglePlay(index) {
     const s = v.sections[index];
@@ -2317,6 +2374,23 @@ export function createTransientView({ request, title, message, onClose }) {
     const at = playPosition();
     stopPlay();
     playRange(index, start, end, Math.min(at, end - 0.005));
+  });
+
+  slicesInput.addEventListener("change", () => {
+    v.settings.slices = slicesInput.checked; // not remembered: every song opens with them shown
+    paintControls();
+    if (!v.analysis) return;
+    if (!v.settings.slices) {
+      hideTools();
+      mergeBtn.hidden = true;
+      v.hover = { section: -1, divider: -1 };
+      // a section playing (or paused) carries on through the rest of the song, from where it is
+      const whole = (p) => p.start <= 0 && p.end >= v.analysis.duration;
+      if (v.play && !whole(v.play)) playFrom(playPosition());
+      else if (v.paused && !whole(v.paused)) v.paused = { start: 0, end: v.analysis.duration, index: -1, section: undefined, at: v.paused.at };
+    }
+    draw();
+    refreshHover();
   });
 
   // ---- Exporting -------------------------------------------------------------------
@@ -2478,6 +2552,9 @@ export function createTransientView({ request, title, message, onClose }) {
     observer.disconnect();
     overviewObserver.disconnect();
     document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onModifier);
+    document.removeEventListener("keyup", onModifier);
+    window.removeEventListener("blur", onBlurWindow);
     v.audio?.ctx.close().catch(() => {});
     if (v.saveTimer) {
       clearTimeout(v.saveTimer);

@@ -680,7 +680,9 @@ const PICKUP_BEATS = 0.45; // …unless a hit this many beats after it at least 
 const PICKUP_RATIO = 1.5;
 const LEAD_IN_S = 0.05; // a lead-in this short joins the first section instead of being one, and so does one shorter
 // than a quarter of a section (never more than a quarter beat): the grid counted back from bar 1 can leave a sliver at 0 s
-const AUTO_BARS_CONFIDENCE = 0.15; // below this tempo confidence, Auto cuts at every transient (no bars)
+const MIN_SLICE_S = 0.15; // Auto and the recut never cut finer than the first of 1/16, 1/8, a beat… this long
+const AUTO_MAX_BARS = 1; // Auto: every bar starts a section
+const RECUT_MAX_BARS = 4; // the recut: a stretch with no mark is one section of up to 4 bars
 const GRID_WINDOW_BEATS = 16; // the dynamic grid is a straight line per 4 bars…
 const DYNAMIC_GAIN = 0.15; // …used only when it puts this much more of the music on its beats than the fixed grid
 
@@ -829,6 +831,15 @@ function barsPerSection(grid) {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * The finest division Auto and the recut quantize to at this tempo: 1/16 of a bar, else 1/8, a beat or half a bar,
+ * the first whose sections last MIN_SLICE_S or more (at 120 BPM a 1/16 is 125 ms: they use 1/8).
+ */
+export function sliceUnit(analysis) {
+  for (const g of ["16", "8", "4", "2"]) if (gridStep(analysis, g) >= MIN_SLICE_S - 1e-9) return g;
+  return "1";
+}
+
 /** Length of one section of a grid, in seconds (null for "auto"). */
 export function gridStep(analysis, grid) {
   const bar = analysis.bar || 4 * (analysis.beat || 0.5);
@@ -885,11 +896,13 @@ function computeGridLines(analysis, grid) {
 }
 
 /**
- * Times where the song is cut. Without `detect` (the user's "Auto-detect transient" off): exactly on every line
+ * Times where the song is cut. Without `detect` (the user's "Transient detection" off): exactly on every line
  * of the grid, built on the tempo (Auto counts as 1:1), nothing moved toward a transient. With it:
- *  - "auto": bars first — every bar starts a section, and inside a bar a cut
- *    goes on each 1/16 line where a transient that passes the sensitivity is
- *    played (on its attack). Without a steady pulse: at every transient;
+ *  - "auto": bars first — every bar starts a section, split in halves (half
+ *    bars, beats, eighths…) where transients that pass the sensitivity are
+ *    played, so every section is a usable length on the tempo (quantized);
+ *  - the recut (TRANSIENT_GRID): the same from the transient marks, in blocks
+ *    of up to 4 bars;
  *  - "1" … "64": on every line of that grid, so each section is a bar, half a
  *    bar … 1/64 long. A cut stays on its line, or moves onto that beat's own
  *    hit (the strongest within 15 ms, or a kick / bass up to 30 ms early; ≤ a
@@ -958,26 +971,63 @@ export function detectCuts(analysis, { sensitivity = DEFAULT_SENSITIVITY, grid =
     return times.filter((t) => t > MIN_SECTION_S && t < duration - MIN_SECTION_S);
   };
 
-  // the user's "recalculate from the transients": one section from each mark to the next
-  if (grid === TRANSIENT_GRID) return everyTransient(MIN_TRANSIENT_GAP_S);
-
-  if (grid === "auto" || !GRIDS.includes(String(grid))) {
-    // no steady pulse to hang bars on: a cut at every transient
-    if ((analysis.confidence ?? 1) < AUTO_BARS_CONFIDENCE || !analysis.bar) return everyTransient(Math.max(0.06, (beat / 4) * 0.6));
-    // Bars first: the whole song is marked in bars and every bar starts a section; inside a bar, a cut goes on
-    // each 1/16 line where a transient (that passes the sensitivity) is played, on its attack.
-    const step = gridStep(analysis, "16");
-    for (const line of gridLines(analysis, "16")) {
-      if (line.time <= leadIn(line.bar ? analysis.bar : step) || line.time >= duration - MIN_SECTION_S || beforeMusic(line.time)) continue;
-      if (line.bar) {
-        push(isMarkedStart(line.time) ? line.time : cutAt(line.time, step));
-        continue;
+  /**
+   * Cuts quantized to usable lengths on the tempo. The song goes in blocks of `maxBars` bars counted from bar 1; a
+   * block is halved, and its halves again, while a mark (moved to the nearest line of the unit) falls inside it, down
+   * to the unit (sliceUnit). So every section is a power-of-two number of units starting on a multiple of its own
+   * length — 4, 2 or 1 bars, half a bar, a beat, an eighth — never 3/16 of a bar. Each cut lands on its hit's attack.
+   */
+  const quantized = (marks, maxBars) => {
+    const unit = sliceUnit(analysis);
+    const lines = gridLines(analysis, unit);
+    if (lines.length < 2) return everyTransient(MIN_TRANSIENT_GAP_S);
+    const times = lines.map((l) => l.time);
+    const nearest = (t) => {
+      let lo = 0;
+      let hi = times.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] < t) lo = mid + 1;
+        else hi = mid;
       }
-      const lo = firstAtOrAfter(onsets, line.time - Math.min(GUARD_S, step * 0.3));
-      const played = lo < onsets.length && onsets[lo].time <= line.time + step / 2;
-      if (played) push(cutAt(line.time, step));
+      return lo > 0 && t - times[lo - 1] < times[lo] - t ? lo - 1 : lo;
+    };
+    const i0 = nearest(origin); // bar 1
+    const marked = new Set(marks.map((t) => nearest(t) - i0));
+    const size = Number(unit) * maxBars; // lines per block
+    const starts = [];
+    const split = (a, n) => {
+      if (n > 1) {
+        for (let k = a + 1; k < a + n; k++) {
+          if (marked.has(k)) {
+            split(a, n / 2);
+            split(a + n / 2, n / 2);
+            return;
+          }
+        }
+      }
+      starts.push(a);
+    };
+    for (let a = Math.floor(-i0 / size) * size; a + i0 < times.length; a += size) split(a, size);
+    const step = gridStep(analysis, unit);
+    for (const r of starts) {
+      const t = times[r + i0];
+      if (t === undefined || t <= leadIn(step) || t >= duration - MIN_SECTION_S || beforeMusic(t)) continue;
+      push(isMarkedStart(t) ? t : cutAt(t, step));
     }
     return cuts;
+  };
+
+  // the user's "recalculate from the transients": sections from the marks, quantized to usable lengths
+  if (grid === TRANSIENT_GRID) return quantized(everyTransient(MIN_TRANSIENT_GAP_S), RECUT_MAX_BARS);
+
+  if (grid === "auto" || !GRIDS.includes(String(grid))) {
+    if (!analysis.bar) return everyTransient(Math.max(0.06, (beat / 4) * 0.6)); // no tempo at all: no bars to count
+    // Bars first: every bar starts a section, halved where something is played inside it
+    return quantized(
+      onsets.map((o) => o.time),
+      AUTO_MAX_BARS,
+    );
   }
   const step = gridStep(analysis, grid);
   for (const { time: line } of gridLines(analysis, grid)) {
