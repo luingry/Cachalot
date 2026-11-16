@@ -3,7 +3,7 @@
   "name": "Cachalot",
   "short_name": "Cachalot",
   "description": "Envia vídeos e áudios da página para o Cachalot (SwissTechKnife) baixar.",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "minimum_chrome_version": "112",
   "permissions": ["cookies", "webRequest", "storage", "contextMenus", "scripting", "declarativeNetRequestWithHostAccess"],
   "host_permissions": ["<all_urls>"],
@@ -11,6 +11,13 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://soundcloud.com/*"],
+      "js": ["src/content/soundcloud.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "Cachalot",
