@@ -131,6 +131,11 @@ mais nova).
 - **Menu do botão direito**: *Baixar com o Cachalot* (página, link — inclusive `magnet:` —,
   vídeo, áudio, imagem, quadro) e *Baixar só o áudio com o Cachalot* (página, link, vídeo,
   áudio). O ícone mostra ✓ ou ! por 2 segundos com o resultado.
+- **Botão no player do SoundCloud**: na barra de reprodução de baixo, à esquerda do ❤ (curtir), um botão de
+  download envia ao Cachalot, como áudio, a faixa que está tocando (pelo link da própria faixa, sem o
+  `?in=` da playlist de onde ela tocou). Fica laranja com ✓ ao enviar e vermelho com ! se falhar (o motivo
+  aparece passando o ponteiro). Depois de atualizar a extensão, abas do SoundCloud já abertas precisam ser
+  recarregadas para o botão voltar a funcionar.
 - **Atalho** <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>: envia a página atual (dá para
   mudar em `chrome://extensions/shortcuts`).
 

@@ -1,7 +1,7 @@
 // Cachalot service worker: toolbar state, media sniffer, context menus,
 // keyboard shortcut and every call to the local bridge.
 
-import { STORAGE_KEYS, createBridgeClient } from "./lib/bridge.js";
+import { STORAGE_KEYS, createBridgeClient, describeBridgeError } from "./lib/bridge.js";
 import { cookiesForDomain, registrableDomainOfUrl } from "./lib/domain.js";
 import { createBadgeFeedback } from "./lib/feedback.js";
 import {
@@ -23,7 +23,14 @@ import {
   contextMenuMode,
   contextMenuTarget,
 } from "./lib/payload.js";
-import { detectPlatform, iconStateFor, isHttpUrl, isMusicPlatform, isPageOnlyPlatform } from "./lib/platforms.js";
+import {
+  detectPlatform,
+  iconStateFor,
+  isHttpUrl,
+  isMusicPlatform,
+  isPageOnlyPlatform,
+  soundcloudTrackUrl,
+} from "./lib/platforms.js";
 import { PREVIEW_RULE_ID } from "./lib/previewrule.js";
 import { adoptPackagedPairing, recordLoadedBuild, shouldReloadForNewBuild } from "./lib/selfsetup.js";
 import { annotateMedia, getTabMedia, handleTabUrlChange, registerSniffer, removeTabMedia } from "./sniffer.js";
@@ -426,6 +433,17 @@ const handlers = {
     return sendToCachalot(tab, { urls: [url], mode: mode === "audio" ? "audio" : null, cookies, title: String(title || "") });
   },
 
+  /** SoundCloud player bar button (content script): the track that is playing, as audio, on behalf of its tab. */
+  async sendPlaying({ url, title = "" }, sender) {
+    const tab = sender?.tab;
+    if (!tab?.id) return { ok: false, error: "unsupported_page" };
+    const track = soundcloudTrackUrl(url);
+    if (!track) return { ok: false, error: "not_found", message: describeBridgeError({ error: "not_found" }) };
+    const result = await sendToCachalot(tab, { urls: [track], mode: "audio", title: String(title || "") });
+    await feedback.show(tab.id, result.ok);
+    return result.ok ? result : { ...result, message: describeBridgeError(result) };
+  },
+
   async downloads() {
     return bridge.downloads();
   },
@@ -481,10 +499,10 @@ const handlers = {
   },
 };
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = handlers[message?.type];
   if (!handler) return false;
-  handler(message)
+  handler(message, sender)
     .then((result) => sendResponse(result))
     .catch((err) => sendResponse({ ok: false, error: "internal", message: String(err?.message || err) }));
   return true;

@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,12 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.6.0",
+      "notes": [
+        "SoundCloud: a download button in the bottom player bar, left of the like button, sends the track that is playing to Cachalot as audio. It turns orange with a check when sent, red with the reason on hover when it fails. SoundCloud tabs open before the update need a reload."
+      ]
+    },
     {
       "version": "2.5.1",
       "notes": [

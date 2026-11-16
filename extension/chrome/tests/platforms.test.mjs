@@ -80,3 +80,17 @@ test("iconStateFor: active on platforms or with sniffed media", () => {
   assert.equal(iconStateFor("chrome://extensions", 3), "inactive");
   assert.equal(iconStateFor(undefined), "inactive");
 });
+
+test("soundcloudTrackUrl keeps user/track and drops the playlist query", async () => {
+  const { soundcloudTrackUrl } = await import("../src/lib/platforms.js");
+  assert.equal(soundcloudTrackUrl("https://soundcloud.com/forss/flickermood"), "https://soundcloud.com/forss/flickermood");
+  assert.equal(
+    soundcloudTrackUrl("https://soundcloud.com/forss/flickermood?in=someone/sets/mix#t=1:00"),
+    "https://soundcloud.com/forss/flickermood",
+  );
+  assert.equal(soundcloudTrackUrl("https://m.soundcloud.com/forss/flickermood/"), "https://soundcloud.com/forss/flickermood");
+  assert.equal(soundcloudTrackUrl("https://soundcloud.com/forss"), null);
+  assert.equal(soundcloudTrackUrl("https://example.com/forss/flickermood"), null);
+  assert.equal(soundcloudTrackUrl("javascript:alert(1)"), null);
+  assert.equal(soundcloudTrackUrl(undefined), null);
+});

@@ -99,3 +99,15 @@ export function iconStateFor(pageUrl, mediaCount = 0) {
   if (detectPlatform(pageUrl) || mediaCount > 0) return "active";
   return "inactive";
 }
+
+/**
+ * The page URL of a SoundCloud track (player bar link), without query or hash ("?in=user/sets/…" would point at the
+ * playlist it was played from). Null when it is not a track: another host, or a path without user and track.
+ */
+export function soundcloudTrackUrl(url) {
+  const u = parseHttpUrl(url);
+  if (!u || !hostMatchesDomain(u.hostname, "soundcloud.com")) return null;
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return `https://soundcloud.com/${parts.join("/")}`;
+}
