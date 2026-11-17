@@ -66,6 +66,9 @@
                 </StackPanel>
                 <ComboBox x:Name="TransientFormatBox" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="OnTransientFormatChanged" AutomationProperties.Name="Formato das seções do modo transiente" />
             </Grid>
+            <TextBlock Text="Formato do áudio por site" Style="{StaticResource Text.BodyStrong}" Margin="0,18,0,0" />
+            <TextBlock x:Name="AudioFormatHint" Style="{StaticResource Hint}" TextWrapping="Wrap" />
+            <StackPanel x:Name="AudioFormatList" />
         </StackPanel>
 
         <!-- Output -->
@@ -124,6 +127,12 @@
         </CheckBox>
         <CheckBox x:Name="ThumbSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
             <TextBlock Text="Embutir a capa (miniatura) no arquivo" Style="{StaticResource Text.BodyStrong}" />
+        </CheckBox>
+        <CheckBox x:Name="SaveThumbSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
+            <StackPanel>
+                <TextBlock Text="Salvar a capa também como arquivo .jpg" Style="{StaticResource Text.BodyStrong}" />
+                <TextBlock Text="Ao lado do vídeo ou da música, com o mesmo nome. Desligado, a capa só vai embutida no arquivo." Style="{StaticResource Hint}" />
+            </StackPanel>
         </CheckBox>
         <CheckBox x:Name="NfoSwitch" Style="{StaticResource Toggle}" Checked="OnSwitch" Unchecked="OnSwitch">
             <StackPanel>

@@ -11,6 +11,7 @@ Opções do download (todas opcionais; ver PADROES):
   formato_audio        original | m4a | mp3 | opus | flac | wav
   modelo_nome          titulo | titulo_id | canal_titulo | data_titulo | <modelo do yt-dlp>
   pular_existentes, embutir_metadados, embutir_miniatura, dividir_capitulos, ao_vivo_do_inicio
+  salvar_capa          também deixa a capa como arquivo .jpg ao lado (desligado: só embutida, nunca solta)
   legendas             nao | arquivo | embutir ; legendas_auto ; idiomas_legenda "pt,en" ; manter_vtt
   sponsorblock         nao | remover | marcar ; sponsorblock_categorias "sponsor,selfpromo,interaction"
   limite_velocidade    "2M" ; fragmentos 1..16 ; proxy ; user_agent ; ignorar_tls
@@ -31,6 +32,7 @@ PADROES = {
     "pular_existentes": True,
     "embutir_metadados": True,
     "embutir_miniatura": True,
+    "salvar_capa": False,
     "dividir_capitulos": False,
     "ao_vivo_do_inicio": False,
     "legendas": "nao",
@@ -75,6 +77,17 @@ def completar(opcoes: dict | None) -> dict:
         if v is not None:
             o[k] = v
     return o
+
+
+# Contêineres que aceitam capa embutida (yt-dlp EmbedThumbnailPP); WAV não aceita.
+SEM_CAPA_EMBUTIDA = ("wav",)
+
+
+def embutir_capa(o: dict, tem_ffmpeg: bool) -> bool:
+    """Embute a capa no arquivo? Nunca em WAV (o yt-dlp falharia e o .jpg convertido ficaria solto na pasta)."""
+    if not (o.get("embutir_miniatura", True) and tem_ffmpeg) or o.get("dividir_capitulos"):
+        return False
+    return not (o.get("modo") == "audio" and o.get("formato_audio") in SEM_CAPA_EMBUTIDA)
 
 
 def altura_maxima(o: dict) -> int:
@@ -150,8 +163,12 @@ def argumentos(o: dict, destino: str, plataforma: str, *, ffmpeg: str, js_runtim
 
     if o.get("embutir_metadados", True) and tem_ffmpeg:
         args.append("--embed-metadata")
-    if o.get("embutir_miniatura", True) and tem_ffmpeg and not o.get("dividir_capitulos") and not a.get("sem_capa"):
-        args += ["--embed-thumbnail", "--convert-thumbnails", "jpg"]
+    if embutir_capa(o, tem_ffmpeg) and not a.get("sem_capa"):
+        args.append("--embed-thumbnail")
+    if o.get("salvar_capa") and not o.get("dividir_capitulos"):
+        args.append("--write-thumbnail")
+    if tem_ffmpeg and ("--embed-thumbnail" in args or "--write-thumbnail" in args):
+        args += ["--convert-thumbnails", "jpg"]
     if o.get("dividir_capitulos") and tem_ffmpeg:
         args.append("--split-chapters")
     if o.get("ao_vivo_do_inicio"):

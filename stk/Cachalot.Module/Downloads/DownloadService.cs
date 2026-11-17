@@ -20,6 +20,10 @@ namespace Cachalot.Module.Downloads
     {
         public string Mode { get; set; }
         public string Quality { get; set; }
+
+        /// <summary>Audio format for this download whatever its mode ends up being (a rule may make it audio).</summary>
+        public string AudioFormat { get; set; }
+
         public string Title { get; set; }
         public Dictionary<string, object> Headers { get; set; }
     }
@@ -144,7 +148,7 @@ namespace Cachalot.Module.Downloads
                 ["acao"] = "adicionar",
                 ["urls"] = list,
                 ["destino"] = folder ?? string.Empty,
-                ["opcoes"] = JobOptions(request?.Mode, request?.Quality, request?.Headers),
+                ["opcoes"] = JobOptions(request?.Mode, request?.Quality, request?.Headers, request?.AudioFormat),
                 ["config"] = Prefs.ToBackendConfig(),
             }).ConfigureAwait(true);
         }
@@ -434,13 +438,17 @@ namespace Cachalot.Module.Downloads
             _awake.Dispose();
         }
 
-        private Dictionary<string, object> JobOptions(string mode, string quality, Dictionary<string, object> headers)
+        private Dictionary<string, object> JobOptions(string mode, string quality, Dictionary<string, object> headers, string audioFormat = null)
         {
             string m = Modes.Normalize(mode ?? Prefs.Mode);
             var options = new Dictionary<string, object> { ["modo"] = m };
             if (m == Modes.Audio)
             {
-                options["formato_audio"] = AudioFormats.Normalize(quality ?? Prefs.AudioFormat);
+                options["formato_audio"] = AudioFormats.Normalize(audioFormat ?? quality ?? Prefs.AudioFormat);
+            }
+            else if (!string.IsNullOrEmpty(audioFormat))
+            {
+                options["formato_audio"] = AudioFormats.Normalize(audioFormat); // a rule may still make it audio
             }
             else
             {

@@ -158,6 +158,7 @@ namespace Cachalot.Module
                     OpenFolderRequested = OnBridgeOpenFolder,
                     ShowRequested = OnBridgeShow,
                     CancelRequested = OnBridgeCancel,
+                    AudioFormatRequested = OnBridgeAudioFormat,
                 };
                 _bridge.Start();
             }
@@ -226,9 +227,17 @@ namespace Cachalot.Module
 
         private async Task QueueFromBrowserAsync(DownloadService service, BridgeDownload request)
         {
+            string origin = request.PageUrl.Length > 0 ? request.PageUrl : request.Urls[0];
+            string format = AudioFormats.All.Contains(request.AudioFormat) ? request.AudioFormat : null;
+            if (format != null && request.RememberFormat && service.Prefs.SetSiteAudioFormat(origin, format))
+            {
+                service.PreferencesChanged();
+            }
+            string remembered = service.Prefs.AudioFormatFor(origin);
             bool sent = await service.AddAsync(request.Urls, service.State.Folder ?? service.DefaultFolder, new AddRequest
             {
                 Mode = string.IsNullOrEmpty(request.Mode) ? null : Modes.Normalize(request.Mode),
+                AudioFormat = format ?? (remembered.Length > 0 ? remembered : null),
                 Title = request.Title,
                 Headers = request.Headers,
             });
@@ -238,6 +247,55 @@ namespace Cachalot.Module
             _context.Notify(sent ? "Recebido do navegador: " + what : "O Cachalot não conseguiu iniciar o download de " + what + ".",
                 sent ? NotificationKind.Info : NotificationKind.Warning);
         }
+
+        /// <summary>Sites whose downloads always come out as audio (the extension's MUSIC_PLATFORMS).</summary>
+        private static readonly string[] MusicSites = { "soundcloud.com", "bandcamp.com", "mixcloud.com", "audiomack.com" };
+
+        /// <summary>
+        /// POST /audio-format: whether a download sent by the extension comes out as audio (asked mode, a matching rule,
+        /// the page's mode, or a music site) and the format remembered for its site (empty: the extension asks).
+        /// </summary>
+        private Dictionary<string, object> OnBridgeAudioFormat(BridgeDownload request)
+        {
+            string url = request.Urls.FirstOrDefault() ?? string.Empty;
+            string origin = request.PageUrl.Length > 0 ? request.PageUrl : url;
+            var reply = new Dictionary<string, object>();
+            _context.Dispatcher.Invoke(new Action(() =>
+            {
+                reply["audio"] = WillBeAudio(_prefs, url.Length > 0 ? url : origin, origin, request.Mode);
+                reply["format"] = _prefs.AudioFormatFor(origin);
+                reply["site"] = Preferences.NormalizeSite(origin);
+            }));
+            return reply;
+        }
+
+        internal static bool WillBeAudio(Preferences prefs, string url, string pageUrl, string mode)
+        {
+            if (!string.IsNullOrEmpty(mode))
+            {
+                return Modes.Normalize(mode) == Modes.Audio;
+            }
+            string link = (url ?? string.Empty).ToLowerInvariant();
+            string host = Uri.TryCreate(url ?? string.Empty, UriKind.Absolute, out Uri u) ? u.Host.ToLowerInvariant() : string.Empty;
+            string pageHost = Uri.TryCreate(pageUrl ?? string.Empty, UriKind.Absolute, out Uri p) ? p.Host.ToLowerInvariant() : host;
+            foreach (Rule rule in prefs.Rules.Where(r => r.Active && !string.IsNullOrWhiteSpace(r.Value)))
+            {
+                string value = rule.Value.Trim().ToLowerInvariant();
+                string site = value.StartsWith("www.", StringComparison.Ordinal) ? value.Substring(4) : value;
+                bool matches = rule.When == "contem" ? link.Contains(value)
+                    : rule.When == "plataforma" ? host.Contains(site)
+                    : host == site || host.EndsWith("." + site, StringComparison.Ordinal);
+                if (matches)
+                {
+                    // the backend's first matching rule wins (servidor.aplicar_regras); without a mode it keeps the page's
+                    return string.IsNullOrEmpty(rule.Mode) ? IsMusicHost(host) || IsMusicHost(pageHost) || prefs.Mode == Modes.Audio : rule.Mode == Modes.Audio;
+                }
+            }
+            return prefs.Mode == Modes.Audio || IsMusicHost(host) || IsMusicHost(pageHost);
+        }
+
+        private static bool IsMusicHost(string host) =>
+            MusicSites.Any(s => host == s || host.EndsWith("." + s, StringComparison.Ordinal));
 
         private int OnBridgeCookies(string domain, List<Dictionary<string, object>> cookies)
         {

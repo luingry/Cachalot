@@ -38,6 +38,7 @@ namespace Cachalot.Tests
             Run("cookies: browser cookies to Netscape", CookieFromBrowser);
             Run("preferences: round trip and defaults", PreferencesRoundTrip);
             Run("cookies: global and per-site switches", CookieSwitches);
+            Run("audio format: per site and audio detection", AudioFormatPerSite);
             // Own STA thread: RunOnDispatcher shuts its dispatcher down, and the integration test needs this one.
             var upgrade = new Thread(() => RunOnDispatcher("upgrade: 1.x state.json opens the page", LegacyStateAsync));
             upgrade.SetApartmentState(ApartmentState.STA);
@@ -98,6 +99,39 @@ namespace Cachalot.Tests
             string[] lines = File.ReadAllLines(Path.Combine(dir, "cookies", "youtube.com.txt"));
             True(lines.Contains(".youtube.com\tTRUE\t/\tTRUE\t1999999999\tSID\tv1"), "secure domain cookie line");
             True(lines.Contains("#HttpOnly_www.youtube.com\tFALSE\t/\tFALSE\t0\tPREF\tv2"), "host-only httpOnly line");
+        }
+
+        private static void AudioFormatPerSite()
+        {
+            string dir = TempDir();
+            var store = new PreferencesStore(dir);
+            Preferences prefs = store.Load();
+            True(!prefs.SaveThumbnail, "the cover is not saved as a file by default");
+            Equal(false, (bool)prefs.ToBackendConfig()["salvar_capa"]);
+            Equal(string.Empty, prefs.AudioFormatFor("https://soundcloud.com/forss/flickermood"));
+            True(prefs.SetSiteAudioFormat("https://soundcloud.com/forss", "MP3"), "site from a page URL");
+            True(!prefs.SetSiteAudioFormat("not a site", "mp3"), "not a site");
+            Equal("mp3", prefs.AudioFormatFor("https://m.soundcloud.com/forss/flickermood?in=x"));
+            Equal(string.Empty, prefs.AudioFormatFor("https://bandcamp.com/x"));
+            prefs.AudioFormatSites["bad site!"] = "mp3";
+            prefs.AudioFormatSites["vimeo.com"] = "exe";
+            store.Save(prefs);
+            Preferences back = store.Load();
+            Equal(1, back.AudioFormatSites.Count);
+            Equal("mp3", back.AudioFormatFor("https://soundcloud.com/a/b"));
+            back.SetSiteAudioFormat("soundcloud.com", string.Empty); // "Perguntar sempre"
+            Equal(0, back.AudioFormatSites.Count);
+
+            // whether the extension asks: only when the download comes out as audio
+            var p = new Preferences();
+            True(CachalotModule.WillBeAudio(p, "https://soundcloud.com/a/b", "https://soundcloud.com/a/b", null), "music site");
+            True(!CachalotModule.WillBeAudio(p, "https://www.youtube.com/watch?v=1", "https://www.youtube.com/watch?v=1", null), "video page");
+            True(CachalotModule.WillBeAudio(p, "https://www.youtube.com/watch?v=1", "https://www.youtube.com/watch?v=1", "audio"), "Só áudio");
+            True(!CachalotModule.WillBeAudio(p, "https://soundcloud.com/a/b", "https://soundcloud.com/a/b", "video"), "asked video");
+            p.Rules.Add(new Rule { Value = "youtube.com", Mode = Modes.Audio });
+            True(CachalotModule.WillBeAudio(p, "https://www.youtube.com/watch?v=1", "https://www.youtube.com/watch?v=1", null), "audio rule");
+            p.Mode = Modes.Audio;
+            True(CachalotModule.WillBeAudio(p, "https://vimeo.com/1", "https://vimeo.com/1", null), "page in audio mode");
         }
 
         private static void PreferencesRoundTrip()

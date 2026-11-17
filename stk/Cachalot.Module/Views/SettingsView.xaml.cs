@@ -38,6 +38,7 @@ namespace Cachalot.Module.Views
                 [PlaylistFolderSwitch] = v => _prefs.PlaylistFolder = v,
                 [MetadataSwitch] = v => _prefs.EmbedMetadata = v,
                 [ThumbSwitch] = v => _prefs.EmbedThumbnail = v,
+                [SaveThumbSwitch] = v => _prefs.SaveThumbnail = v,
                 [NfoSwitch] = v => _prefs.WriteNfo = v,
                 [ChaptersSwitch] = v => _prefs.SplitChapters = v,
                 [LiveSwitch] = v => _prefs.LiveFromStart = v,
@@ -60,6 +61,7 @@ namespace Cachalot.Module.Views
             PlaylistFolderSwitch.IsChecked = _prefs.PlaylistFolder;
             MetadataSwitch.IsChecked = _prefs.EmbedMetadata;
             ThumbSwitch.IsChecked = _prefs.EmbedThumbnail;
+            SaveThumbSwitch.IsChecked = _prefs.SaveThumbnail;
             NfoSwitch.IsChecked = _prefs.WriteNfo;
             ChaptersSwitch.IsChecked = _prefs.SplitChapters;
             LiveSwitch.IsChecked = _prefs.LiveFromStart;
@@ -103,6 +105,7 @@ namespace Cachalot.Module.Views
                 if (IsVisible)
                 {
                     LoadTransientFormat();
+                    BuildAudioFormats(); // "Lembrar para este site" in the extension meanwhile
                     BuildCookies(); // sites the extension sent meanwhile
                 }
             };
@@ -129,6 +132,7 @@ namespace Cachalot.Module.Views
             UpdateFfmpeg();
             UpdateEngines();
             UpdateCookiesPanel();
+            BuildAudioFormats();
             BuildCookies();
             BuildRules();
             BuildChannels();
@@ -243,6 +247,51 @@ namespace Cachalot.Module.Views
                 UpdateTransientFormatHint();
                 Save();
             }
+        }
+
+        // ── audio format per site ──
+
+        /// <summary>One row per site with a remembered format; "Perguntar sempre" forgets it (the extension asks again).</summary>
+        private void BuildAudioFormats()
+        {
+            AudioFormatList.Children.Clear();
+            List<KeyValuePair<string, string>> sites = (_prefs.AudioFormatSites ?? new Dictionary<string, string>())
+                .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToList();
+            AudioFormatHint.Text = sites.Count == 0
+                ? "A extensão pergunta o formato a cada áudio que você baixa. Marque “Lembrar para este site” na pergunta e o site aparece aqui."
+                : "A extensão usa estes formatos sem perguntar. “Perguntar sempre” volta a perguntar naquele site.";
+            foreach (KeyValuePair<string, string> site in sites)
+            {
+                AudioFormatList.Children.Add(AudioFormatRow(site.Key, site.Value));
+            }
+        }
+
+        private FrameworkElement AudioFormatRow(string site, string format)
+        {
+            var row = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+            TextBlock name = Label(site, "Text.BodyStrong");
+            name.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(name);
+            var box = new ComboBox { VerticalAlignment = VerticalAlignment.Center };
+            System.Windows.Automation.AutomationProperties.SetName(box, "Formato do áudio em " + site);
+            // a format remembered before the question offered fewer (m4a, opus) stays listed while it is the choice
+            IEnumerable<string> formats = AudioFormats.Asked.Contains(format) ? AudioFormats.Asked : AudioFormats.Asked.Concat(new[] { format });
+            Fill(box, new[] { new Option(string.Empty, "Perguntar sempre") }
+                .Concat(formats.Select(f => new Option(f, AudioFormats.Label(f)))), format);
+            box.SelectionChanged += (s, e) =>
+            {
+                _prefs.SetSiteAudioFormat(site, Selected(box));
+                Save();
+                if (Selected(box).Length == 0)
+                {
+                    Dispatcher.BeginInvoke(new Action(BuildAudioFormats)); // forgotten: the row goes
+                }
+            };
+            Grid.SetColumn(box, 1);
+            row.Children.Add(box);
+            return row;
         }
 
         private void OnBrowserChanged(object sender, SelectionChangedEventArgs e)

@@ -103,6 +103,20 @@ class Opcoes(unittest.TestCase):
         original = opcoes_ytdlp.completar({"modo": "audio"})
         self.assertEqual(opcoes_ytdlp.seletor_formato(original, True), ["-f", "ba/b", "--remux-video", "webm>opus"])
 
+    def test_capa(self):
+        def args(**o):
+            return opcoes_ytdlp.argumentos(opcoes_ytdlp.completar(o), r"C:	mp", "soundcloud", ffmpeg="ffmpeg.exe", js_runtimes=[])
+        padrao = args(modo="audio")
+        self.assertIn("--embed-thumbnail", padrao)
+        self.assertNotIn("--write-thumbnail", padrao)  # capa solta só se pedirem
+        wav = args(modo="audio", formato_audio="wav")
+        self.assertNotIn("--embed-thumbnail", wav)  # WAV não aceita capa embutida
+        self.assertNotIn("--convert-thumbnails", wav)
+        salvar = args(modo="audio", formato_audio="wav", salvar_capa=True)
+        self.assertIn("--write-thumbnail", salvar)
+        self.assertIn("--convert-thumbnails", salvar)
+        self.assertNotIn("--embed-thumbnail", args(embutir_miniatura=False))
+
     def test_flags_proibidas(self):
         self.assertEqual(opcoes_ytdlp.flags_extras_validas('--exec "rm -rf x" --embed-chapters --downloader=aria2c'), ["--embed-chapters"])
 
@@ -308,6 +322,25 @@ class Cookies(unittest.TestCase):
             self.assertFalse(any(n.startswith("cookies") for n, _ in sem), sem)
             self.assertTrue(all(not a.get("cookies") for _, a in sem))
             self.assertTrue(any(n.startswith("cliente") for n, _ in sem))
+
+
+class CapasSoltas(unittest.TestCase):
+    def test_apaga_so_a_capa_deste_download(self):
+        import tempfile, time
+        import servidor
+        with tempfile.TemporaryDirectory() as pasta:
+            audio = os.path.join(pasta, "Artista - Faixa.wav")
+            capa = os.path.join(pasta, "Artista - Faixa.jpg")
+            antiga = os.path.join(pasta, "Artista - Faixa.png")
+            outra = os.path.join(pasta, "Outra.jpg")
+            for f in (audio, capa, antiga, outra):
+                open(f, "wb").close()
+            inicio = time.time()
+            os.utime(antiga, (inicio - 3600, inicio - 3600))  # já estava lá antes do download
+            self.assertEqual(servidor.limpar_capas_soltas(audio, inicio), [capa])
+            self.assertFalse(os.path.exists(capa))
+            self.assertTrue(os.path.exists(antiga) and os.path.exists(outra) and os.path.exists(audio))
+            self.assertEqual(servidor.limpar_capas_soltas("", inicio), [])
 
 
 if __name__ == "__main__":

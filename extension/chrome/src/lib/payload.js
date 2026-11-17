@@ -9,12 +9,38 @@ export const COMMAND_SEND_PAGE = "send-page";
 
 const MAX_TITLE = 300;
 
+/** Audio formats Cachalot converts to (module AudioFormats), in the order the format question shows them. */
+export const AUDIO_FORMATS = Object.freeze(["mp3", "flac", "wav", "original"]);
+
+export const AUDIO_FORMAT_LABELS = Object.freeze({
+  mp3: "MP3",
+  flac: "FLAC",
+  wav: "WAV",
+  original: "Original",
+});
+
+export const AUDIO_FORMAT_HINTS = Object.freeze({
+  mp3: "320 kbps",
+  flac: "Sem perdas, comprimido",
+  wav: "Sem perdas, sem compressão",
+  original: "Como o site entrega",
+});
+
 function normalizeMode(mode) {
   return mode === "audio" || mode === "video" ? mode : null;
 }
 
 /** Body for POST /download following the bridge contract. */
-export function buildDownloadPayload({ urls, mode = null, title = "", pageUrl = "", headers = null, cookies = null } = {}) {
+export function buildDownloadPayload({
+  urls,
+  mode = null,
+  title = "",
+  pageUrl = "",
+  headers = null,
+  cookies = null,
+  audioFormat = null,
+  rememberFormat = false,
+} = {}) {
   const list = (Array.isArray(urls) ? urls : [urls]).filter((u) => isSendableUrl(u));
   const body = { urls: list, mode: normalizeMode(mode), quality: null };
   const cleanTitle = typeof title === "string" ? title.trim().slice(0, MAX_TITLE) : "";
@@ -28,6 +54,10 @@ export function buildDownloadPayload({ urls, mode = null, title = "", pageUrl = 
     if (Object.keys(picked).length) body.headers = picked;
   }
   if (Array.isArray(cookies) && cookies.length) body.cookies = cookies;
+  if (AUDIO_FORMATS.includes(audioFormat)) {
+    body.audioFormat = audioFormat;
+    if (rememberFormat === true) body.rememberFormat = true; // Cachalot stores it for the page's site
+  }
   return body;
 }
 

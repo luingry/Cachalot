@@ -85,3 +85,13 @@ export function awaitingListing(sentAt, now = Date.now()) {
 export function anyActive(views) {
   return views.some((v) => v && (v.state === "wait" || v.state === "run"));
 }
+
+/** The newest Cachalot item whose URL passes match (e.g. the same SoundCloud track, whatever query it was sent with). */
+export function latestMatching(items, match) {
+  let best;
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || !match(item.url)) continue;
+    if (!best || (item.created || 0) > (best.created || 0)) best = item;
+  }
+  return best;
+}

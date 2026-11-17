@@ -22,6 +22,12 @@ namespace Cachalot.Module.Bridge
         public string PageUrl { get; set; }
         public Dictionary<string, object> Headers { get; set; }
         public List<Dictionary<string, object>> Cookies { get; } = new List<Dictionary<string, object>>();
+
+        /// <summary>Audio format the user picked in the extension (empty: the site's remembered one, else the page's).</summary>
+        public string AudioFormat { get; set; }
+
+        /// <summary>"Lembrar para este site": the module stores <see cref="AudioFormat"/> for the page's site.</summary>
+        public bool RememberFormat { get; set; }
     }
 
     /// <summary>An answer of the module to a bridge call: HTTP status and JSON body.</summary>
@@ -39,7 +45,7 @@ namespace Cachalot.Module.Bridge
 
     /// <summary>
     /// Tiny HTTP server on 127.0.0.1 (47821–47830) for the Chrome extension: <c>GET /ping</c>, <c>GET /downloads</c>,
-    /// <c>POST /download</c>, <c>POST /cookies</c>, <c>POST /open-folder</c>, <c>POST /show</c>, <c>POST /cancel</c> and the transient mode's <c>POST /transient/{prepare,status,pcm,export,open,format}</c>. A raw socket instead of HttpListener so no URL reservation or admin rights are needed.
+    /// <c>POST /download</c>, <c>POST /audio-format</c>, <c>POST /cookies</c>, <c>POST /open-folder</c>, <c>POST /show</c>, <c>POST /cancel</c> and the transient mode's <c>POST /transient/{prepare,status,pcm,export,open,format}</c>. A raw socket instead of HttpListener so no URL reservation or admin rights are needed.
     /// Every POST needs the pairing code shown in the settings; requests from web pages (http/https origins) are refused.
     /// Idle cost: one pending accept, no polling.
     /// </summary>
@@ -82,6 +88,12 @@ namespace Cachalot.Module.Bridge
 
         /// <summary>POST /cancel {"id"}: cancels a queued or running download; false when it is unknown or finished.</summary>
         public Func<string, bool> CancelRequested { get; set; }
+
+        /// <summary>
+        /// POST /audio-format {"url", "pageUrl", "mode"}: whether that download comes out as audio and the format remembered
+        /// for its site ({"audio": bool, "format": "" | "mp3"…, "site"}), so the extension knows when to ask.
+        /// </summary>
+        public Func<BridgeDownload, Dictionary<string, object>> AudioFormatRequested { get; set; }
 
         /// <summary>
         /// POST /transient/{prepare,status,export,open,format}: transient mode (waveform and sections of a song). Gets the operation and
@@ -227,7 +239,7 @@ namespace Cachalot.Module.Bridge
                 return Json(200, new Dictionary<string, object> { ["items"] = items });
             }
             bool transient = request.Path.StartsWith("/transient/", StringComparison.Ordinal);
-            if (request.Method != "POST" || (!transient && request.Path != "/download" && request.Path != "/cookies" && request.Path != "/open-folder" && request.Path != "/show" && request.Path != "/cancel"))
+            if (request.Method != "POST" || (!transient && request.Path != "/download" && request.Path != "/audio-format" && request.Path != "/cookies" && request.Path != "/open-folder" && request.Path != "/show" && request.Path != "/cancel"))
             {
                 return Json(404, new Dictionary<string, object> { ["error"] = "not found" });
             }
@@ -293,7 +305,18 @@ namespace Cachalot.Module.Bridge
                 Title = Str(body, "title"),
                 PageUrl = Str(body, "pageUrl"),
                 Headers = body.TryGetValue("headers", out object h) ? h as Dictionary<string, object> : null,
+                AudioFormat = Str(body, "audioFormat"),
+                RememberFormat = body.TryGetValue("rememberFormat", out object r) && r is bool remember && remember,
             };
+            if (request.Path == "/audio-format")
+            {
+                download.Urls.Add(Str(body, "url"));
+                if (AudioFormatRequested == null)
+                {
+                    return Json(503, new Dictionary<string, object> { ["error"] = "not ready" });
+                }
+                return Json(200, AudioFormatRequested(download));
+            }
             if (body.TryGetValue("urls", out object rawUrls) && rawUrls is object[] urls)
             {
                 foreach (object u in urls)

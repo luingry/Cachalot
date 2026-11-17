@@ -1,6 +1,6 @@
 {
   "id": "vd-get",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "entryAssembly": "Cachalot.Module.dll",
   "entryType": "Cachalot.Module.CachalotModule",
   "sdkVersion": 1,
@@ -8,6 +8,14 @@
   "settings": true,
   "loadMode": "memory",
   "releaseNotes": [
+    {
+      "version": "2.7.0",
+      "notes": [
+        "Audio downloads from the extension ask the format (MP3, FLAC, WAV or Original, one under the other), in the popup and on the SoundCloud player button. \"Lembrar para este site\" stops asking on that site; Settings › Formato do áudio por site shows, changes or forgets each one.",
+        "The cover is no longer left as a loose .jpg next to the file. It is only embedded, and Settings › Extras has a new switch, off by default, to also save it as a .jpg. WAV never gets an embedded cover (it cannot hold one), so its download no longer fails and retries.",
+        "SoundCloud player button: a green check when the playing track is already downloaded in Cachalot, a progress ring while it downloads (spinning while queued)."
+      ]
+    },
     {
       "version": "2.6.0",
       "notes": [

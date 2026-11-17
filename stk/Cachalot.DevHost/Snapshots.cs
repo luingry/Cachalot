@@ -166,6 +166,7 @@ namespace Cachalot.DevHost
             }
             prefs.SetSiteCookies("instagram.com", false);
             prefs.SetSiteCookies("tiktok.com", false);
+            prefs.SetSiteAudioFormat("soundcloud.com", "mp3");
         }
 
         private static void Render(FrameworkElement element, string path, Rect? region = null)
