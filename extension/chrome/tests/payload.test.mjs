@@ -85,3 +85,17 @@ test("badge feedback shows ✓ / ! and restores after the delay", async () => {
   await fb.show(-1, true);
   assert.equal(painted.length, 2, "no tab, no badge");
 });
+
+test("buildDownloadPayload carries the picked audio format and the remember flag", async () => {
+  const { buildDownloadPayload } = await import("../src/lib/payload.js");
+  const url = "https://soundcloud.com/forss/flickermood";
+  const picked = buildDownloadPayload({ urls: [url], mode: "audio", audioFormat: "mp3", rememberFormat: true });
+  assert.equal(picked.audioFormat, "mp3");
+  assert.equal(picked.rememberFormat, true);
+  const notRemembered = buildDownloadPayload({ urls: [url], audioFormat: "wav" });
+  assert.equal(notRemembered.audioFormat, "wav");
+  assert.equal("rememberFormat" in notRemembered, false);
+  const unknown = buildDownloadPayload({ urls: [url], audioFormat: "exe", rememberFormat: true });
+  assert.equal("audioFormat" in unknown, false);
+  assert.equal("rememberFormat" in unknown, false);
+});

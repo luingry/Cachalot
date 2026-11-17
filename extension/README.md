@@ -133,9 +133,17 @@ mais nova).
   áudio). O ícone mostra ✓ ou ! por 2 segundos com o resultado.
 - **Botão no player do SoundCloud**: na barra de reprodução de baixo, à esquerda do ❤ (curtir), um botão de
   download envia ao Cachalot, como áudio, a faixa que está tocando (pelo link da própria faixa, sem o
-  `?in=` da playlist de onde ela tocou). Fica laranja com ✓ ao enviar e vermelho com ! se falhar (o motivo
-  aparece passando o ponteiro). Depois de atualizar a extensão, abas do SoundCloud já abertas precisam ser
-  recarregadas para o botão voltar a funcionar.
+  `?in=` da playlist de onde ela tocou). O botão mostra como a faixa está no Cachalot (fila e histórico de
+  `GET /downloads`): **✓ verde** se ela já foi baixada (clicar baixa de novo), um **anel de progresso** laranja
+  enquanto baixa (girando enquanto espera na fila; a porcentagem aparece passando o ponteiro) e vermelho com ! se
+  falhar (o motivo aparece passando o ponteiro). Ele pergunta ao Cachalot quando a faixa muda e quando a aba volta a ficar visível, e só repete a
+  pergunta enquanto há download em andamento. Depois de atualizar a extensão, abas do SoundCloud já abertas
+  precisam ser recarregadas para o botão voltar a funcionar.
+- **Formato do áudio**: antes de baixar áudio (popup ou botão do SoundCloud) aparece **Baixar como**, com MP3,
+  FLAC, WAV e Original um embaixo do outro (setas ↑/↓ e Enter também escolhem; Esc fecha). **Lembrar para <site>**
+  faz o Cachalot guardar a escolha daquele site e não perguntar mais; em Configurações › *Formato do áudio por site*
+  dá para trocar ou voltar a perguntar. Vídeo não pergunta. O menu do botão direito e o atalho não perguntam: usam
+  o formato lembrado do site, senão o da página do Cachalot.
 - **Atalho** <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>: envia a página atual (dá para
   mudar em `chrome://extensions/shortcuts`).
 

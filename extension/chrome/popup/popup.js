@@ -24,6 +24,7 @@ import { anyActive, awaitingListing, currentItem, downloadKey, downloadView, lat
 import { attachMse, dashPlan, parseHlsMaster, pickVariant } from "../src/lib/streams.js";
 import { WAVE_ICON, createTransientView, icon } from "./transient.js";
 import { makeTitleEditable } from "./editable-title.js";
+import { pickAudioFormat } from "./format-picker.js";
 
 const $ = (id) => document.getElementById(id);
 const CLOSED_POLL_MS = 4000;
@@ -342,10 +343,25 @@ function showPageFeedback(ok, text) {
   p.style.animation = "";
 }
 
+/**
+ * The audio format of a send: {} when it is not audio (or Cachalot is older), { audioFormat } when Cachalot remembers
+ * one for the site, else asked next to the button ({ audioFormat, rememberFormat }); null when the question is dismissed.
+ */
+async function audioFormatFor(target, button) {
+  const res = await message("audioFormat", { tabId: state.tab.id, ...target });
+  if (!res?.ok || !res.audio) return {};
+  if (res.format) return { audioFormat: res.format };
+  const choice = await pickAudioFormat(button, res.site);
+  return choice ? { audioFormat: choice.format, rememberFormat: choice.remember } : null;
+}
+
 async function sendPage(mode, button) {
   if (!state.tab || cancelFromButton(button)) return;
+  const sendMode = mode || (pageIsAudio() ? "audio" : null);
+  const format = await audioFormatFor({ mode: sendMode }, button);
+  if (!format) return;
   setBusy(button, true, "Enviando");
-  const res = await message("sendPage", { tabId: state.tab.id, mode: mode || (pageIsAudio() ? "audio" : null), title: state.pageName || null });
+  const res = await message("sendPage", { tabId: state.tab.id, mode: sendMode, title: state.pageName || null, ...format });
   setBusy(button, false);
   // Success needs no message: the "Baixar" button itself turns into "✓ Na fila" and follows the download.
   if (res.ok) {
@@ -1305,16 +1321,20 @@ async function loadTransientRestore() {
 async function sendRow(row, li, button) {
   if (cancelFromButton(button)) return;
   li.querySelector(".media-error")?.remove();
+  const link = row.kind === "youtube" || row.kind === "track";
+  const linkMode = row.kind === "track" ? "audio" : null;
+  const format = await audioFormatFor(link ? { url: row.url, mode: linkMode } : { id: row.id }, button);
+  if (!format) return;
   setBusy(button, true, "");
-  const res =
-    row.kind === "youtube" || row.kind === "track"
-      ? await message("sendLink", {
-          tabId: state.tab.id,
-          url: row.url,
-          title: row.artist ? `${row.artist} - ${row.name}` : row.name,
-          mode: row.kind === "track" ? "audio" : null,
-        })
-      : await message("sendMedia", { tabId: state.tab.id, id: row.id });
+  const res = link
+    ? await message("sendLink", {
+        tabId: state.tab.id,
+        url: row.url,
+        title: row.artist ? `${row.artist} - ${row.name}` : row.name,
+        mode: linkMode,
+        ...format,
+      })
+    : await message("sendMedia", { tabId: state.tab.id, id: row.id, ...format });
   setBusy(button, false);
   if (res.ok) {
     state.rowFeedback.delete(row.id);

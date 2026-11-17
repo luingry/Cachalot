@@ -14,6 +14,7 @@ import {
   wantsNowPlaying,
 } from "./lib/media.js";
 import { readMediaSession } from "./lib/pagescan.js";
+import { awaitingListing, downloadView, latestMatching } from "./lib/progress.js";
 import { parsePairingCode } from "./lib/pairing.js";
 import {
   COMMAND_SEND_PAGE,
@@ -257,9 +258,10 @@ async function resolveCookieChoice(tab, explicit) {
 
 /**
  * Sends URLs to Cachalot on behalf of a tab.
- * options: { urls, mode, headers, cookies (boolean | undefined = site setting), title (default: the tab's) }
+ * options: { urls, mode, headers, cookies (boolean | undefined = site setting), title (default: the tab's),
+ *            audioFormat (picked in the format question), rememberFormat ("Lembrar para este site") }
  */
-async function sendToCachalot(tab, { urls, mode = null, headers = null, cookies, title = null } = {}) {
+async function sendToCachalot(tab, { urls, mode = null, headers = null, cookies, title = null, audioFormat = null, rememberFormat = false } = {}) {
   if (!tab || !isHttpUrl(tab.url)) return { ok: false, error: "unsupported_page" };
   const withCookies = await resolveCookieChoice(tab, cookies);
   const cookieList = withCookies ? (await collectCookies(tab)).cookies : null;
@@ -270,6 +272,8 @@ async function sendToCachalot(tab, { urls, mode = null, headers = null, cookies,
     pageUrl: tab.url,
     headers,
     cookies: cookieList,
+    audioFormat,
+    rememberFormat,
   });
   if (!payload.urls.length) return { ok: false, error: "unsupported_page" };
   const result = await bridge.download(payload);
@@ -404,14 +408,47 @@ const handlers = {
     };
   },
 
-  async sendPage({ tabId, mode = null, cookies, title = null }) {
+  async sendPage({ tabId, mode = null, cookies, title = null, audioFormat = null, rememberFormat = false }) {
     const tab = await getTab(tabId);
     if (!tab) return { ok: false, error: "unsupported_page" };
     // title: the name the user typed in the popup (none: the tab's)
-    return sendToCachalot(tab, { urls: [tab.url], mode: mode === "audio" ? "audio" : null, cookies, title: title ? String(title) : null });
+    return sendToCachalot(tab, {
+      urls: [tab.url],
+      mode: mode === "audio" ? "audio" : null,
+      cookies,
+      title: title ? String(title) : null,
+      audioFormat,
+      rememberFormat,
+    });
   },
 
-  async sendMedia({ tabId, id, cookies }) {
+  /**
+   * Before a send from the popup: whether it comes out as audio and the format remembered for the site
+   * ({ ok, audio, format: "" = ask, site }). target: the page ({ mode }), a sniffed row ({ id }) or a link ({ url, mode }).
+   */
+  async audioFormat({ tabId, id = null, url = null, mode = null }) {
+    const tab = await getTab(tabId);
+    if (!tab || !isHttpUrl(tab.url)) return { ok: false, error: "unsupported_page" };
+    let target = url || tab.url;
+    let targetMode = mode === "audio" || mode === "video" ? mode : null;
+    if (id) {
+      const row = await findMedia(tabId, { id });
+      if (!row) return { ok: false, error: "not_found" };
+      target = row.url;
+      targetMode = modeForRow(row);
+    }
+    return bridge.audioFormat({ url: target, pageUrl: tab.url, mode: targetMode });
+  },
+
+  /** SoundCloud player bar button: the format question for the playing track (always audio). */
+  async playingFormat({ url }, sender) {
+    const tab = sender?.tab;
+    const track = soundcloudTrackUrl(url);
+    if (!tab?.id || !track) return { ok: false, error: "not_found" };
+    return bridge.audioFormat({ url: track, pageUrl: tab.url, mode: "audio" });
+  },
+
+  async sendMedia({ tabId, id, cookies, audioFormat = null, rememberFormat = false }) {
     const tab = await getTab(tabId);
     if (!tab) return { ok: false, error: "unsupported_page" };
     const row = await findMedia(tabId, { id });
@@ -422,26 +459,53 @@ const handlers = {
       headers: row.headers,
       cookies,
       title: row.meta?.title ? [row.meta.artist, row.meta.title].filter(Boolean).join(" - ") : null,
+      audioFormat,
+      rememberFormat,
     });
   },
 
   /** Another video or track the page shows (popup list): sent by its own page URL. */
-  async sendLink({ tabId, url, title = "", mode = null, cookies }) {
+  async sendLink({ tabId, url, title = "", mode = null, cookies, audioFormat = null, rememberFormat = false }) {
     const tab = await getTab(tabId);
     if (!tab) return { ok: false, error: "unsupported_page" };
     if (!isHttpUrl(url)) return { ok: false, error: "not_found" };
-    return sendToCachalot(tab, { urls: [url], mode: mode === "audio" ? "audio" : null, cookies, title: String(title || "") });
+    return sendToCachalot(tab, {
+      urls: [url],
+      mode: mode === "audio" ? "audio" : null,
+      cookies,
+      title: String(title || ""),
+      audioFormat,
+      rememberFormat,
+    });
   },
 
   /** SoundCloud player bar button (content script): the track that is playing, as audio, on behalf of its tab. */
-  async sendPlaying({ url, title = "" }, sender) {
+  async sendPlaying({ url, title = "", audioFormat = null, rememberFormat = false }, sender) {
     const tab = sender?.tab;
     if (!tab?.id) return { ok: false, error: "unsupported_page" };
     const track = soundcloudTrackUrl(url);
     if (!track) return { ok: false, error: "not_found", message: describeBridgeError({ error: "not_found" }) };
-    const result = await sendToCachalot(tab, { urls: [track], mode: "audio", title: String(title || "") });
+    const result = await sendToCachalot(tab, { urls: [track], mode: "audio", title: String(title || ""), audioFormat, rememberFormat });
     await feedback.show(tab.id, result.ok);
     return result.ok ? result : { ...result, message: describeBridgeError(result) };
+  },
+
+  /**
+   * SoundCloud player bar button: how the playing track stands in Cachalot (newest item for that track in GET
+   * /downloads). view: null (never sent) or { state: "wait" | "run" | "done" | "fail" | "paused", progress, detail }.
+   */
+  async playingStatus({ url }) {
+    const track = soundcloudTrackUrl(url);
+    if (!track) return { ok: false, error: "not_found" };
+    const res = await bridge.downloads();
+    if (!res.ok) return res;
+    const item = latestMatching(res.items, (u) => soundcloudTrackUrl(u) === track);
+    let sentAt = 0;
+    if (!item) sentAt = ((await chrome.storage.local.get(SENT_KEY))[SENT_KEY] || {})[track] || 0;
+    const view = downloadView(item, awaitingListing(sentAt));
+    if (!view) return { ok: true, view: null };
+    const detail = view.state === "fail" ? item?.error || "" : view.state === "run" ? [item?.speed, item?.eta && `faltam ${item.eta}`].filter(Boolean).join(" · ") : "";
+    return { ok: true, view: { state: view.state, progress: view.progress, detail } };
   },
 
   async downloads() {

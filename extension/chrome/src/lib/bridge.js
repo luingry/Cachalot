@@ -210,6 +210,16 @@ export function createBridgeClient({
     return result;
   }
 
+  /**
+   * POST /audio-format: whether a download comes out as audio and the format remembered for its site.
+   * Resolves to { ok: true, audio, format ("" = ask), site } or { ok: false, error } (an older Cachalot answers 404).
+   */
+  async function audioFormat({ url, pageUrl = "", mode = null }) {
+    const result = await call("POST", "/audio-format", { url, pageUrl, mode: mode || "" });
+    if (result.ok) return { ok: true, audio: result.audio === true, format: String(result.format || ""), site: String(result.site || "") };
+    return result;
+  }
+
   /** POST /cookies. Resolves to { ok: true, count } or { ok: false, error, message }. */
   async function sendCookies(domain, cookies) {
     const result = await call("POST", "/cookies", { domain, cookies });
@@ -265,7 +275,7 @@ export function createBridgeClient({
     return call("POST", "/transient/pcm", { id: String(id || "") }, { timeoutMs: TRANSIENT_TIMEOUTS_MS.pcm, binary: true });
   }
 
-  return { readConfig, status, pair, download, sendCookies, downloads, openFolder, show, cancel, transient, transientPcm };
+  return { readConfig, status, pair, download, audioFormat, sendCookies, downloads, openFolder, show, cancel, transient, transientPcm };
 }
 
 /** pt-BR message for a failed bridge call. */

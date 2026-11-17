@@ -1460,3 +1460,44 @@ body.has-transient {
   margin: 0;
   accent-color: var(--accent);
 }
+
+/* "Baixar como": the audio format question of a download (popup/format-picker.js) */
+.format-pop {
+  position: fixed;
+  z-index: 50;
+  width: 240px;
+  max-width: calc(100vw - 16px);
+}
+
+.format-pop .tr-format-options {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.format-pop-btn {
+  display: flex;
+  align-items: center;
+  line-height: 16px;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  text-align: left;
+}
+
+.format-pop-name {
+  min-width: 52px;
+}
+
+.format-pop-hint {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.format-pop-btn:active .format-pop-hint {
+  color: inherit;
+}

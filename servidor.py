@@ -1319,8 +1319,35 @@ def _ajustes_genericos(url: str, o: dict, erro: str, ja: dict) -> list[tuple[str
     return seq
 
 
+CAPAS_SOLTAS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def limpar_capas_soltas(caminho: str, desde: float) -> list[str]:
+    """
+    Apaga a capa que o yt-dlp deixou ao lado do arquivo (mesmo nome, .jpg/.png/.webp) quando o usuário não pediu
+    para salvá-la: acontece quando embutir falha (ex.: o original do SoundCloud é .wav) e a nova tentativa sem capa
+    reaproveita o arquivo já baixado. Só o que foi gravado neste download (mtime ≥ desde) sai.
+    """
+    if not caminho or not os.path.isfile(caminho):
+        return []
+    base, ext = os.path.splitext(caminho)
+    apagadas = []
+    for e in CAPAS_SOLTAS:
+        capa = base + e
+        if e == ext.lower() or not os.path.isfile(capa):
+            continue
+        try:
+            if os.path.getmtime(capa) >= desde - 2:
+                os.remove(capa)
+                apagadas.append(capa)
+        except OSError as erro:
+            print(f"[!] Não deu para apagar a capa solta {capa}: {erro}")
+    return apagadas
+
+
 async def baixar_ytdlp(dl_id: str, ctl: Controle, url: str, destino: str, o: dict) -> bool:
     loop = asyncio.get_running_loop()
+    inicio = time.time()
     chave, nome_plat = fontes.plataforma(url)
     ajustes: dict = {}
     if url_exige_impersonate_browser(url) and impersonate_disponivel():
@@ -1421,6 +1448,8 @@ async def baixar_ytdlp(dl_id: str, ctl: Controle, url: str, destino: str, o: dic
                             thumb=downloads[dl_id]["thumb"] or melhor_thumbnail(resultado))
             if o.get("nfo") and caminho:
                 escrever_nfo(caminho, resultado or info or {}, url, downloads[dl_id].get("plataforma") or nome_plat)
+            if not o.get("salvar_capa"):
+                limpar_capas_soltas(caminho, inicio)
             return True
         except DownloadCancelled:
             raise Cancelado(ctl.sinal or "cancelar")

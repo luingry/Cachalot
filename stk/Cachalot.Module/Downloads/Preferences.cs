@@ -34,6 +34,9 @@ namespace Cachalot.Module.Downloads
         // Extras
         public bool EmbedMetadata { get; set; } = true;
         public bool EmbedThumbnail { get; set; } = true;
+
+        /// <summary>Also keep the cover as a .jpg next to the file. Off: the cover is only embedded, never left loose.</summary>
+        public bool SaveThumbnail { get; set; }
         public bool WriteNfo { get; set; }
         public bool SplitChapters { get; set; }
         public bool LiveFromStart { get; set; }
@@ -93,6 +96,12 @@ namespace Cachalot.Module.Downloads
         /// <summary>Hash of the bundled extension last copied to the Chrome folder (empty: never copied by this version).</summary>
         public string ExtensionBuild { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Audio format remembered per site (registrable domain → <see cref="AudioFormats"/> value) by the extension's
+        /// "Lembrar para este site". A site without one is asked on every audio download sent by the extension.
+        /// </summary>
+        public Dictionary<string, string> AudioFormatSites { get; set; } = new Dictionary<string, string>();
+
         public List<Rule> Rules { get; set; } = new List<Rule>();
         public List<Channel> Channels { get; set; } = new List<Channel>();
 
@@ -110,6 +119,7 @@ namespace Cachalot.Module.Downloads
             ["playlist_em_pasta"] = PlaylistFolder,
             ["embutir_metadados"] = EmbedMetadata,
             ["embutir_miniatura"] = EmbedThumbnail,
+            ["salvar_capa"] = SaveThumbnail,
             ["nfo"] = WriteNfo,
             ["dividir_capitulos"] = SplitChapters,
             ["ao_vivo_do_inicio"] = LiveFromStart,
@@ -171,6 +181,48 @@ namespace Cachalot.Module.Downloads
             {
                 CookiesDisabledSites.Add(key);
                 CookiesDisabledSites.Sort(StringComparer.Ordinal);
+            }
+            return true;
+        }
+
+        /// <summary>The audio format remembered for the site of <paramref name="url"/> (or a page URL); empty: ask.</summary>
+        internal string AudioFormatFor(string url)
+        {
+            Dictionary<string, string> sites = AudioFormatSites;
+            if (sites == null || sites.Count == 0 || !Uri.TryCreate(url ?? string.Empty, UriKind.Absolute, out Uri uri))
+            {
+                return string.Empty;
+            }
+            foreach (string key in SiteKeys(uri.Host))
+            {
+                if (sites.TryGetValue(key, out string format))
+                {
+                    return format;
+                }
+            }
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Remembers <paramref name="format"/> for a site, or forgets it (empty or unknown: ask again). Returns false when
+        /// <paramref name="site"/> is not a site.
+        /// </summary>
+        internal bool SetSiteAudioFormat(string site, string format)
+        {
+            string key = NormalizeSite(site);
+            if (key.Length == 0)
+            {
+                return false;
+            }
+            AudioFormatSites = AudioFormatSites ?? new Dictionary<string, string>();
+            string f = (format ?? string.Empty).Trim().ToLowerInvariant();
+            if (AudioFormats.All.Contains(f))
+            {
+                AudioFormatSites[key] = f;
+            }
+            else
+            {
+                AudioFormatSites.Remove(key);
             }
             return true;
         }
@@ -241,6 +293,17 @@ namespace Cachalot.Module.Downloads
             TransientFormat = TransientFormats.Normalize(TransientFormat);
             Rules = Rules ?? new List<Rule>();
             Channels = Channels ?? new List<Channel>();
+            var formats = new Dictionary<string, string>();
+            foreach (KeyValuePair<string, string> pair in AudioFormatSites ?? new Dictionary<string, string>())
+            {
+                string site = NormalizeSite(pair.Key);
+                string f = (pair.Value ?? string.Empty).Trim().ToLowerInvariant();
+                if (site.Length > 0 && AudioFormats.All.Contains(f))
+                {
+                    formats[site] = f;
+                }
+            }
+            AudioFormatSites = formats;
             CookiesDisabledSites = (CookiesDisabledSites ?? new List<string>())
                 .Select(NormalizeSite).Where(s => s.Length > 0).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             foreach (Channel channel in Channels)
@@ -362,6 +425,9 @@ namespace Cachalot.Module.Downloads
     {
         public const string Original = "original";
         public static readonly string[] All = { Original, "m4a", "mp3", "opus", "flac", "wav" };
+
+        /// <summary>What the extension's format question offers (and the per-site list in the settings), in its order.</summary>
+        public static readonly string[] Asked = { "mp3", "flac", "wav", Original };
 
         public static string Normalize(string value) => All.Contains(value) ? value : Original;
 

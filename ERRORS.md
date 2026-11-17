@@ -5,6 +5,20 @@ Antes de investigar um erro novo, consulte esta lista.
 
 ---
 
+## -31. SoundCloud: um .jpg da capa aparecia solto ao lado da música
+
+**Sintoma:** baixar uma faixa do SoundCloud (popup ou botão do player) deixava `Artista - Faixa.jpg` na pasta junto
+com o áudio. `backend.log`: `Postprocessing: Supported filetypes for thumbnail embedding are: mp3, mkv/mka, ogg/opus/flac,
+m4a/mp4/m4v/mov → tentando sem capa embutida`.
+**Causa:** com formato "Original" o SoundCloud entrega o **.wav** de algumas faixas. `--embed-thumbnail
+--convert-thumbnails jpg` baixa e converte a capa, o embutir falha (WAV não aceita capa) e a nova tentativa "sem capa"
+reaproveita o .wav já baixado (`--no-overwrites`), mas ninguém apagava o .jpg da primeira tentativa.
+**Solução:** `opcoes_ytdlp.embutir_capa` nunca embute em WAV; `servidor.limpar_capas_soltas` apaga, ao terminar, a capa
+com o mesmo nome do arquivo gravada durante aquele download. Salvar a capa como arquivo virou opção
+(`salvar_capa` / *Salvar a capa também como arquivo .jpg*, desligada por padrão, usa `--write-thumbnail`).
+
+---
+
 ## -30. Extensão: "Unchecked runtime.lastError: No tab with id: …" na página de erros
 
 **Sintoma:** `chrome://extensions` → Erros listava `Unchecked runtime.lastError: No tab with id: 682404005.`, contexto

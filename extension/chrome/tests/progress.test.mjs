@@ -59,3 +59,19 @@ test("currentItem: after sending again, the old finished item no longer counts",
   assert.equal(currentItem(fresh, 2000 * 1000), fresh);
   assert.equal(downloadView(currentItem(old, 2_000_000), true).text, "✓ Na fila");
 });
+
+test("latestMatching picks the newest item whose URL matches", async () => {
+  const { latestMatching } = await import("../src/lib/progress.js");
+  const { soundcloudTrackUrl } = await import("../src/lib/platforms.js");
+  const track = "https://soundcloud.com/forss/flickermood";
+  const match = (url) => soundcloudTrackUrl(url) === track;
+  const items = [
+    { url: "https://soundcloud.com/forss/flickermood?in=x/sets/y", status: "erro", created: 1 },
+    { url: "https://soundcloud.com/forss/voca-nomen-tuum", status: "concluido", created: 5 },
+    { url: track, status: "concluido", created: 3 },
+    null,
+  ];
+  assert.equal(latestMatching(items, match).created, 3);
+  assert.equal(latestMatching(items, () => false), undefined);
+  assert.equal(latestMatching(undefined, match), undefined);
+});
